@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<script id="gpt6-luna-shim">
+/* gpt-6-luna: modelo por defecto con temperatura=1 (actualización sep-2026).
+   Adapta las peticiones a la API de OpenAI para la familia gpt-6:
+   temperature=1, max_tokens -> max_completion_tokens (con margen para razonamiento)
+   y reintento automático si la API rechaza algún parámetro. */
+(function(){
+  var NEW='gpt-6-luna', OLD='gpt-4o-mini';
+  try{
+    if(!localStorage.getItem('__gpt6_luna_mig_v1')){
+      for(var i=0;i<localStorage.length;i++){
+        var k=localStorage.key(i), v=localStorage.getItem(k);
+        if(v===OLD||v==='"'+OLD+'"'){ localStorage.setItem(k, v.replace(OLD,NEW)); continue; }
+        if(v && v.length<20000 && v.charAt(0)==='{' && v.indexOf(OLD)>=0){
+          try{ var o=JSON.parse(v), ch=false;
+            for(var p in o){ if(o[p]===OLD){ o[p]=NEW; ch=true; } }
+            if(ch) localStorage.setItem(k, JSON.stringify(o));
+          }catch(e){}
+        }
+      }
+      localStorage.setItem('__gpt6_luna_mig_v1','1');
+    }
+  }catch(e){}
+  var of=window.fetch; if(!of) return;
+  function adapt(url,b){
+    if(!b || typeof b.model!=='string' || !/^gpt-6/.test(b.model)) return false;
+    b.temperature=1;
+    ['top_p','frequency_penalty','presence_penalty','logit_bias','logprobs','top_logprobs'].forEach(function(p){ delete b[p]; });
+    if(/chat\/completions/.test(url) && b.max_tokens!=null){
+      if(b.max_completion_tokens==null) b.max_completion_tokens=Math.min(128000, (+b.max_tokens||0)+6000);
+      delete b.max_tokens;
+    }
+    return true;
+  }
+  window.fetch=function(input,init){
+    var url=typeof input==='string'?input:(input&&input.url)||'';
+    if(!/api\.openai\.com\/v1\/(chat\/completions|responses)/.test(url) || !init || typeof init.body!=='string') return of.apply(this,arguments);
+    var b; try{ b=JSON.parse(init.body); }catch(e){ return of.apply(this,arguments); }
+    if(!adapt(url,b)) return of.apply(this,arguments);
+    var self=this, tries=0;
+    function go(){
+      var ini=Object.assign({},init,{body:JSON.stringify(b)});
+      return of.call(self,input,ini).then(function(r){
+        if(r.status!==400 || tries>=3) return r;
+        return r.clone().json().then(function(j){
+          var err=(j&&j.error)||{}, p=err.param, msg=String(err.message||'');
+          if(!p){ var m=msg.match(/'([a-z_]+)'/); if(m) p=m[1]; }
+          if(p && b.hasOwnProperty(p) && /unsupported|not supported|does not support|only the default/i.test(msg)){
+            delete b[p]; tries++; return go();
+          }
+          return r;
+        },function(){ return r; });
+      });
+    }
+    return go();
+  };
+})();
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AdaptIA · Tu artículo, adaptado a la revista sin tocar la ciencia</title>
+<meta name="description" content="Asistente de envío a revista: analiza las normas, compara tu manuscrito, propone solo los cambios necesarios con un diff científico que tú aceptas, convierte las referencias y prepara el paquete de envío.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --tinta:#0F2237; --acero:#2E4B6B; --acero-claro:#7C93AC; --gris:#5D7691;
+  --papel:#F3F6FA; --blanco:#FFFFFF; --linea:#D8E0E9; --linea-2:#E8EEF4;
+  --brasa:#E4572E; --brasa-osc:#C9441F; --brasa-suave:#FDEBE4;
+  --forjado:#0E7C6B; --forjado-suave:#E0F3EE; --aviso:#8A3617;
+  --c-ctx:#1F6FB2; --c-comp:#6B4FD8; --c-rda:#0E8C7A; --c-tema:#C98200; --c-eval:#E4572E; --c-final:#2E4B6B;
+  --sombra:0 1px 0 rgba(15,34,55,.05), 0 14px 34px -22px rgba(15,34,55,.45);
+  --sombra-alta:0 2px 0 rgba(15,34,55,.04), 0 22px 50px -24px rgba(15,34,55,.55);
+  --r:14px;
+  --display:"Bricolage Grotesque",Georgia,serif;
+  --texto:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--papel);color:var(--tinta);font-family:var(--texto);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased;padding-bottom:84px}
+a{color:var(--acero)}
+:focus-visible{outline:3px solid var(--brasa);outline-offset:2px;border-radius:6px}
+.hidden{display:none!important}
+svg.i{width:1.15em;height:1.15em;vertical-align:-.2em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+code{font-family:var(--mono);font-size:.85em;background:var(--linea-2);padding:1px 5px;border-radius:5px}
+
+/* Barra superior */
+.topbar{position:sticky;top:0;z-index:40;background:var(--tinta);color:#EAF1F7;box-shadow:0 6px 24px -14px rgba(0,0,0,.6)}
+.tb-in{max-width:1180px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:14px}
+.logo{background:none;border:0;color:#fff;font-family:var(--display);font-weight:800;font-size:24px;letter-spacing:-.03em;cursor:pointer;padding:2px 4px;display:flex;align-items:center;gap:8px}
+.logo em{font-style:normal;color:var(--brasa)}
+.logo .anv{width:30px;height:30px;border-radius:9px;background:var(--brasa);display:grid;place-items:center;color:#fff}
+.stepper{flex:1;display:flex;align-items:center;justify-content:center;min-width:0}
+.sdot{display:flex;align-items:center;gap:7px;background:none;border:0;color:#8FA7BE;font:600 13px var(--texto);padding:6px;cursor:pointer;border-radius:10px;white-space:nowrap}
+.sdot:disabled{cursor:not-allowed;opacity:.45}
+.sdot .n{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;border:2px solid #3E5C7D;font-size:12px;color:#A9C0D4;transition:all .2s}
+.sdot .n svg{width:14px;height:14px}
+.sdot[data-state="done"] .n{background:var(--forjado);border-color:var(--forjado);color:#fff}
+.sdot[data-state="now"]{color:#fff}
+.sdot[data-state="now"] .n{background:var(--brasa);border-color:var(--brasa);color:#fff;box-shadow:0 0 0 4px rgba(228,87,46,.25)}
+.sdot:not(:disabled):hover{background:rgba(255,255,255,.06)}
+.sline{flex:0 1 26px;height:2px;background:#2F4A68;min-width:6px}
+.sline.on{background:var(--forjado)}
+.tb-tools{display:flex;gap:6px}
+.tb-btn{background:transparent;border:1px solid #3E5C7D;color:#C9D8E6;border-radius:9px;padding:6px 10px;font:600 13px var(--texto);cursor:pointer;display:flex;align-items:center;gap:6px}
+.tb-btn:hover{border-color:var(--brasa);color:#fff}
+.progress{height:4px;background:#1E3550}
+.progress span{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--brasa),#F59E0B);transition:width .4s}
+@media(max-width:960px){.sdot .lbl{display:none}.sdot[data-state="now"] .lbl{display:inline}}
+@media(max-width:720px){
+  .tb-in{flex-wrap:wrap;gap:8px}
+  .stepper{order:3;flex-basis:100%;justify-content:space-between}
+  .sdot[data-state="now"] .lbl{display:none}
+  .tb-btn .lbl{display:none}
+}
+
+/* Pantallas */
+main{max-width:1180px;margin:0 auto;padding:26px 16px 40px}
+.screen{display:none}
+.screen.on{display:block}
+@media(prefers-reduced-motion:no-preference){.screen.on{animation:rise .35s cubic-bezier(.2,.7,.3,1) both}@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}}
+.sh{display:flex;gap:18px;align-items:flex-start;margin:4px 0 22px}
+.sh-ico{width:64px;height:64px;border-radius:18px;background:var(--c,var(--brasa));color:#fff;display:grid;place-items:center;flex:none;box-shadow:0 12px 24px -14px var(--c,var(--brasa))}
+.sh-ico svg{width:32px;height:32px}
+.sh-step{font:600 12px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--acero-claro);margin:4px 0}
+.sh h2{font-family:var(--display);font-weight:800;font-size:clamp(26px,3.6vw,38px);letter-spacing:-.025em;line-height:1.05;margin:0 0 6px}
+.sh-lede{margin:0;color:var(--gris);font-size:16.5px;max-width:70ch}
+@media(max-width:600px){.sh-ico{width:48px;height:48px;border-radius:14px}.sh-ico svg{width:24px;height:24px}}
+
+.card{background:var(--blanco);border:1px solid var(--linea);border-radius:var(--r);box-shadow:var(--sombra);padding:20px;margin-bottom:18px}
+.card h3{font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:-.01em;margin:0 0 4px;display:flex;align-items:center;gap:9px}
+.card h3 .num{width:26px;height:26px;border-radius:8px;background:var(--tinta);color:#fff;font:700 13px var(--mono);display:grid;place-items:center}
+.card .sub{margin:0 0 14px;color:var(--gris);font-size:14px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.cols{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:20px;align-items:start}
+.sticky{position:sticky;top:96px}
+@media(max-width:900px){.cols{grid-template-columns:1fr}.sticky{position:static}}
+@media(max-width:640px){.grid2{grid-template-columns:1fr}}
+
+label,.lab{display:block;font-size:13.5px;font-weight:600;margin:0 0 6px;color:var(--acero)}
+label small,.lab small{font-weight:500;color:var(--acero-claro)}
+input[type=text],input[type=password],input[type=number],textarea,select{width:100%;padding:11px 13px;border:1.5px solid var(--linea);border-radius:10px;font-family:var(--texto);font-size:15px;color:var(--tinta);background:#fff;transition:border-color .15s,box-shadow .15s}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acero-claro);box-shadow:0 0 0 4px rgba(124,147,172,.18)}
+input.bad{border-color:var(--brasa);box-shadow:0 0 0 4px rgba(228,87,46,.15)}
+textarea{resize:vertical;min-height:96px;line-height:1.5}
+input::placeholder,textarea::placeholder{color:#9DB0C2}
+.field{margin-bottom:16px}
+.help{font-size:12.8px;color:var(--gris);margin:6px 0 0}
+.help b{color:var(--acero)}
+
+button{font-family:var(--texto);cursor:pointer}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:11px;font-weight:600;font-size:15px;border:1.5px solid transparent;padding:11px 18px;transition:transform .08s,background .15s,border-color .15s;text-decoration:none;line-height:1.2}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--brasa);color:#fff;box-shadow:0 8px 18px -10px var(--brasa)}
+.btn-primary:hover{background:var(--brasa-osc)}
+.btn-big{font-size:17px;padding:14px 24px;border-radius:13px}
+.btn-dark{background:var(--tinta);color:#fff}
+.btn-dark:hover{background:#1c3656}
+.btn-ghost{background:#fff;border-color:var(--linea);color:var(--acero)}
+.btn-ghost:hover{border-color:var(--acero-claro);background:#F7FAFC}
+.btn-ok{background:var(--forjado);color:#fff}
+.btn-ok:hover{background:#0b6457}
+.btn-word{background:#2B579A;color:#fff}
+.btn-word:hover{background:#1e3f7a}
+.btn-sm{padding:7px 12px;font-size:13.5px;border-radius:9px}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{background:#fff;border:1.5px solid var(--linea);border-radius:999px;padding:7px 13px;font-size:13.5px;color:var(--acero);cursor:pointer;display:inline-flex;align-items:center;gap:6px;line-height:1.25;text-align:left}
+.chip:hover{border-color:var(--brasa);color:var(--brasa)}
+.chip[aria-pressed="true"]{background:var(--tinta);border-color:var(--tinta);color:#fff}
+.chip.mini-ex{font-size:12.5px;padding:4px 10px;border-style:dashed}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg button{border:1.5px solid var(--linea);background:#fff;border-radius:9px;padding:7px 11px;font-size:13.5px;font-weight:600;color:var(--acero)}
+.seg button:hover{border-color:var(--acero-claro)}
+.seg button[aria-pressed="true"]{background:var(--tinta);border-color:var(--tinta);color:#fff}
+
+.meto{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
+.meto button{text-align:left;background:#fff;border:1.5px solid var(--linea);border-radius:12px;padding:10px 12px;color:var(--tinta)}
+.meto button b{display:block;font-size:14px}
+.meto button span{display:block;font-size:12.3px;color:var(--gris);line-height:1.35;margin-top:2px}
+.meto button:hover{border-color:var(--acero-claro)}
+.meto button[aria-pressed="true"]{border-color:var(--tinta);box-shadow:0 0 0 2px var(--tinta);background:var(--papel)}
+
+.tip{display:flex;gap:12px;background:#FFF8E6;border:1px solid #F3DDA0;border-radius:12px;padding:13px 15px;font-size:14px;color:#6B4E00;margin-bottom:18px}
+.tip svg{width:22px;height:22px;color:#C98200;flex:none;margin-top:1px}
+.tip strong{color:#523B00}
+.aviso{background:var(--brasa-suave);border:1px solid #F3C7B5;border-radius:12px;padding:13px 15px;font-size:14px;color:var(--aviso);margin-bottom:16px}
+.okbox{background:var(--forjado-suave);border:1px solid #A9DCCF;border-radius:12px;padding:13px 15px;font-size:14px;color:#0B5A4E;margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+
+/* Inicio */
+.hero{background:var(--tinta);color:#EAF1F7;border-radius:22px;padding:40px 36px;position:relative;overflow:hidden;margin-bottom:26px;box-shadow:var(--sombra-alta)}
+.hero::before{content:"";position:absolute;right:-80px;top:-80px;width:360px;height:360px;border-radius:50%;background:radial-gradient(circle,rgba(228,87,46,.55),transparent 65%)}
+.hero::after{content:"";position:absolute;left:30%;bottom:-140px;width:420px;height:280px;border-radius:50%;background:radial-gradient(circle,rgba(14,140,122,.35),transparent 65%)}
+.hero>*{position:relative;z-index:1}
+@media(max-width:600px){.hero{padding:28px 20px;border-radius:18px}}
+.eyebrow{font:600 11.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8FA7BE;margin:0 0 14px}
+.hero h1{font-family:var(--display);font-weight:800;font-size:clamp(34px,5.4vw,58px);line-height:.98;letter-spacing:-.035em;margin:0 0 16px;max-width:17ch}
+.hero h1 em{font-style:normal;color:var(--brasa)}
+.hero p.lede{max-width:62ch;font-size:18px;color:#C3D3E2;margin:0 0 24px}
+.hero .actions .btn-ghost{background:transparent;color:#fff;border-color:#4A6787}
+.hero .actions .btn-ghost:hover{border-color:#fff}
+.draft{margin-top:18px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:12px 14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:14.5px}
+.sec-title{font-family:var(--display);font-weight:800;font-size:24px;letter-spacing:-.02em;margin:34px 0 6px}
+.sec-sub{color:var(--gris);margin:0 0 16px}
+.journey{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.jstop{background:#fff;border:1px solid var(--linea);border-radius:14px;padding:16px;position:relative}
+.jstop .ji{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:#fff;background:var(--c);margin-bottom:10px}
+.jstop .ji svg{width:20px;height:20px}
+.jstop b{display:block;font-size:15px;margin-bottom:2px}
+.jstop span{display:block;font-size:13px;color:var(--gris);line-height:1.45}
+.jstop .jn{position:absolute;top:12px;right:14px;font:700 12px var(--mono);color:var(--acero-claro)}
+@media(max-width:900px){.journey{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.journey{grid-template-columns:1fr}}
+
+.parts{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+.part{display:flex;gap:12px;align-items:flex-start;background:#fff;border:1px solid var(--linea);border-radius:12px;padding:12px 14px}
+.part .pi{width:34px;height:34px;border-radius:10px;background:color-mix(in srgb,var(--c) 14%,#fff);color:var(--c);display:grid;place-items:center;flex:none}
+.part b{display:block;font-size:14.5px}
+.part span{display:block;font-size:12.8px;color:var(--gris);line-height:1.4}
+
+.examples{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.excard{background:#fff;border:1px solid var(--linea);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:8px;box-shadow:var(--sombra);position:relative;overflow:hidden;text-align:left;font:inherit;color:inherit;cursor:pointer;transition:transform .15s,box-shadow .15s}
+.excard:hover{transform:translateY(-3px);box-shadow:var(--sombra-alta)}
+.excard::before{content:"";position:absolute;left:0;top:0;right:0;height:5px;background:var(--c)}
+.excard .emo{font-size:32px;line-height:1}
+.excard .area{font:700 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--acero-claro)}
+.excard b{font-family:var(--display);font-size:18px;letter-spacing:-.01em;line-height:1.15}
+.excard p{margin:0;font-size:13.5px;color:var(--gris);flex:1}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:700;color:var(--c);background:color-mix(in srgb,var(--c) 12%,#fff);border-radius:999px;padding:3px 9px;align-self:flex-start}
+
+/* Clave */
+.keyrow{display:flex;gap:8px}
+.keyrow input{flex:1;font-family:var(--mono);font-size:14px}
+.eye{width:46px;flex:none;border:1.5px solid var(--linea);background:#fff;border-radius:10px;color:var(--acero);display:grid;place-items:center}
+.light{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:12px;background:var(--papel);margin-top:14px;font-size:14.5px;font-weight:600}
+.light .bulbo{width:14px;height:14px;border-radius:50%;background:#B8C5D3;box-shadow:0 0 0 4px rgba(184,197,211,.3);flex:none}
+.light[data-s="ok"] .bulbo{background:#16A34A;box-shadow:0 0 0 4px rgba(22,163,74,.22)}
+.light[data-s="err"] .bulbo{background:var(--brasa);box-shadow:0 0 0 4px rgba(228,87,46,.22)}
+.light[data-s="wait"] .bulbo{background:#F59E0B;box-shadow:0 0 0 4px rgba(245,158,11,.25)}
+.olsteps{list-style:none;padding:0;margin:0;counter-reset:o;display:flex;flex-direction:column;gap:12px}
+.olsteps li{counter-increment:o;display:flex;gap:12px;font-size:14.5px;align-items:flex-start}
+.olsteps li::before{content:counter(o);width:28px;height:28px;border-radius:50%;background:var(--brasa-suave);color:var(--brasa);font:700 13px var(--mono);display:grid;place-items:center;flex:none}
+
+/* Acordeones */
+.acc{background:#fff;border:1px solid var(--linea);border-radius:var(--r);margin-bottom:12px;box-shadow:var(--sombra);overflow:hidden}
+.acc>summary{list-style:none;cursor:pointer;padding:15px 18px;display:flex;align-items:center;gap:12px}
+.acc>summary::-webkit-details-marker{display:none}
+.acc>summary .ai{width:36px;height:36px;border-radius:10px;background:var(--papel);color:var(--acero);display:grid;place-items:center;flex:none}
+.acc[open]>summary .ai{background:var(--tinta);color:#fff}
+.acc>summary b{font-family:var(--display);font-size:17px;display:block}
+.acc>summary small{display:block;color:var(--gris);font-size:13px}
+.acc>summary .chev{margin-left:auto;transition:transform .2s;color:var(--acero-claro)}
+.acc[open]>summary .chev{transform:rotate(180deg)}
+.acc .inner{padding:4px 18px 18px;border-top:1px solid var(--linea-2)}
+.acc .inner>*:first-child{margin-top:14px}
+.prompt-ta{font-family:var(--mono);font-size:12.3px;min-height:130px;background:#FBFDFE}
+
+/* Resumen lateral */
+.sum h3{margin-bottom:10px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+.stat{background:var(--papel);border-radius:12px;padding:10px 12px}
+.stat b{display:block;font:800 24px var(--display);letter-spacing:-.02em;line-height:1.1}
+.stat span{font-size:12.3px;color:var(--gris)}
+.checks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.checks li{display:flex;gap:9px;align-items:center;color:var(--gris)}
+.checks li .ck{width:20px;height:20px;border-radius:50%;border:2px solid var(--linea);display:grid;place-items:center;flex:none}
+.checks li.on{color:var(--tinta)}
+.checks li.on .ck{background:var(--forjado);border-color:var(--forjado);color:#fff}
+.checks li .ck svg{width:12px;height:12px}
+.docname{margin-top:14px;padding:11px 13px;border-radius:11px;background:var(--tinta);color:#C3D3E2;font-size:13.5px}
+.docname b{color:#fff}
+
+/* Generación */
+.agents{display:flex;flex-direction:column;gap:10px}
+.agent{background:#fff;border:1px solid var(--linea);border-radius:var(--r);box-shadow:var(--sombra);overflow:hidden;transition:border-color .2s}
+.agent-h{display:flex;align-items:center;gap:14px;padding:14px 16px;cursor:pointer}
+.agent .ai{width:42px;height:42px;border-radius:12px;background:color-mix(in srgb,var(--c) 14%,#fff);color:var(--c);display:grid;place-items:center;flex:none;transition:all .2s}
+.agent .ai svg{width:20px;height:20px}
+.agent-t{flex:1;min-width:0}
+.agent-t b{display:block;font-family:var(--display);font-size:16.5px}
+.agent-t span{display:block;font-size:13px;color:var(--gris)}
+.pill{font-size:12.5px;font-weight:700;border-radius:999px;padding:4px 10px;background:var(--linea-2);color:var(--gris);white-space:nowrap}
+.agent[data-s="run"]{border-color:#F59E0B}
+.agent[data-s="run"] .ai{background:var(--c);color:#fff;animation:pulse 1s infinite alternate}
+.agent[data-s="run"] .pill{background:#FFF1D6;color:#8A5A00}
+.agent[data-s="ok"] .ai{background:var(--c);color:#fff}
+.agent[data-s="ok"] .pill{background:var(--forjado-suave);color:var(--forjado)}
+.agent[data-s="err"]{border-color:var(--brasa)}
+.agent[data-s="err"] .pill{background:var(--brasa-suave);color:var(--brasa)}
+.agent-b{display:none;padding:4px 18px 16px 72px;font-size:14px;border-top:1px solid var(--linea-2);background:#FBFDFE}
+.agent.open .agent-b{display:block}
+@media(max-width:600px){.agent-b{padding-left:18px}}
+@keyframes pulse{from{transform:scale(1);box-shadow:0 0 0 0 rgba(228,87,46,.5)}to{transform:scale(1.06);box-shadow:0 0 0 10px rgba(228,87,46,0)}}
+.forging{display:flex;align-items:center;gap:14px;padding:16px 18px;border-radius:14px;background:var(--tinta);color:#fff;margin-bottom:16px}
+.forging .spark{width:44px;height:44px;border-radius:12px;background:var(--brasa);display:grid;place-items:center;flex:none;animation:pulse 1s infinite alternate}
+.forging.done .spark{background:var(--forjado);animation:none}
+.forging.err .spark{animation:none}
+.forging b{font-family:var(--display);font-size:18px;display:block}
+.forging span{font-size:14px;color:#C3D3E2}
+.mini-list{margin:10px 0 0;padding:0;list-style:none}
+.mini-list li{padding:5px 0;border-bottom:1px solid var(--linea-2)}
+.mini-list li:last-child{border-bottom:0}
+.code{display:inline-block;font:700 11px var(--mono);border-radius:5px;padding:1px 6px;margin-right:6px;background:var(--linea-2);color:var(--acero)}
+
+/* Guía */
+.res-head{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.res-head h2{font-family:var(--display);font-weight:800;font-size:clamp(24px,3vw,32px);letter-spacing:-.02em;margin:0;flex:1;min-width:240px;line-height:1.1}
+.doc{background:#fff;border:1px solid var(--linea);border-radius:18px;box-shadow:var(--sombra-alta);padding:40px 44px;max-width:900px;margin:0 auto}
+@media(max-width:700px){.doc{padding:22px 16px}}
+.doc-h{border-bottom:3px solid var(--tinta);padding-bottom:18px;margin-bottom:26px}
+.doc-kind{font:600 12px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--brasa);margin:0 0 6px}
+.doc-h h1{font-family:var(--display);font-weight:800;font-size:clamp(26px,3.4vw,36px);letter-spacing:-.025em;line-height:1.05;margin:0 0 12px}
+.meta{display:flex;flex-wrap:wrap;gap:6px}
+.meta span{font-size:12.8px;font-weight:600;background:var(--papel);color:var(--acero);border-radius:999px;padding:4px 11px}
+.dsec{margin-bottom:28px}
+.dsec h2{font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:-.01em;margin:0 0 10px;display:flex;align-items:center;gap:10px}
+.dsec h2 .num{width:28px;height:28px;border-radius:8px;background:var(--tinta);color:#fff;font:700 13px var(--mono);display:grid;place-items:center;flex:none}
+.dsec p{margin:0 0 10px;max-width:75ch}
+.sublab{font-size:13px;font-weight:700;color:var(--acero-claro);margin:14px 0 6px}
+.row{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--linea-2);font-size:14.5px;align-items:flex-start}
+.row:last-child{border-bottom:0}
+.row .code{margin-top:2px;flex:none}
+.code.cg{background:#E6F0FA;color:var(--c-ctx)}
+.code.ce{background:#EEEAFB;color:var(--c-comp)}
+.code.bl{background:var(--forjado-suave);color:var(--forjado)}
+.code.tm{background:var(--tinta);color:#fff}
+.row .hrs{margin-left:auto;font-size:12.5px;color:var(--gris);white-space:nowrap}
+.blk{font-weight:700;margin:16px 0 4px;display:flex;gap:8px;align-items:baseline}
+.blk small{font-weight:500;color:var(--gris)}
+.tbl-wrap{overflow-x:auto}
+table.t{width:100%;border-collapse:collapse;font-size:14px}
+table.t th{background:var(--tinta);color:#fff;text-align:left;padding:9px 11px;font-size:12.5px;font-weight:700}
+table.t td{padding:9px 11px;border-bottom:1px solid var(--linea-2);vertical-align:top}
+table.t tr:nth-child(even) td{background:#FAFCFE}
+.peso{font-weight:800;color:var(--brasa);white-space:nowrap}
+.note{margin-top:12px;padding:11px 14px;background:var(--papel);border-left:4px solid var(--forjado);border-radius:8px;font-size:14px}
+.demo-flag{background:#FFF8E6;border:1px solid #F3DDA0;color:#6B4E00;border-radius:12px;padding:11px 15px;font-size:14px;margin:0 auto 16px;max-width:900px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.demo-flag svg{color:#C98200}
+
+/* Navegación inferior */
+.bottomnav{position:fixed;left:0;right:0;bottom:0;z-index:35;background:rgba(255,255,255,.94);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-top:1px solid var(--linea)}
+.bn-in{max-width:1180px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:12px}
+.bn-hint{flex:1;text-align:center;font-size:14px;color:var(--gris)}
+.bn-hint b{color:var(--tinta)}
+@media(max-width:600px){.bn-hint{display:none}.bn-in{justify-content:space-between}}
+
+/* Modal */
+.modal{position:fixed;inset:0;z-index:60;background:rgba(15,34,55,.55);display:none;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto}
+.modal.on{display:flex}
+.modal-box{background:#fff;border-radius:18px;max-width:760px;width:100%;box-shadow:var(--sombra-alta);overflow:hidden}
+.modal-head{display:flex;align-items:center;gap:12px;padding:16px 20px;background:var(--tinta);color:#fff}
+.modal-head h2{font-family:var(--display);font-size:22px;margin:0;flex:1}
+.modal-head button{background:transparent;border:1px solid #4A6787;color:#fff;border-radius:9px;padding:6px 10px}
+.modal-body{padding:18px 20px 22px}
+.glos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:600px){.glos{grid-template-columns:1fr}}
+.glos div{background:var(--papel);border-radius:12px;padding:12px 14px}
+.glos b{display:block;font-family:var(--display);font-size:16px;margin-bottom:2px}
+.glos span{font-size:13.8px;color:var(--acero)}
+.hist{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--linea);border-radius:12px;margin-bottom:8px}
+.hist-t{flex:1;min-width:0;cursor:pointer}
+.hist-t b{display:block;font-size:15px}
+.hist-t span{font-size:12.8px;color:var(--gris)}
+.hist:hover{border-color:var(--acero-claro)}
+.iconbtn{width:34px;height:34px;border-radius:9px;border:1.5px solid var(--linea);background:#fff;color:var(--acero);display:grid;place-items:center;padding:0}
+.iconbtn:hover{border-color:var(--brasa);color:var(--brasa)}
+.empty{text-align:center;color:var(--gris);padding:30px 10px}
+
+.toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(20px);background:var(--tinta);color:#fff;padding:11px 18px;border-radius:12px;font-size:14.5px;font-weight:600;opacity:0;pointer-events:none;transition:all .25s;z-index:70;max-width:90vw;text-align:center;box-shadow:var(--sombra-alta)}
+.toast.on{opacity:1;transform:translateX(-50%)}
+footer{max-width:1180px;margin:0 auto;padding:0 16px 30px;font-size:13px;color:#6E8299}
+footer hr{border:0;border-top:1px solid var(--linea);margin:0 0 14px}
+
+@media print{
+  body{background:#fff;padding:0}
+  .topbar,.bottomnav,.res-head,.demo-flag,.okbox,footer,.toast,.modal{display:none!important}
+  main{padding:0;max-width:none}
+  .screen{display:none!important}
+  
+  .doc{box-shadow:none;border:0;padding:0;max-width:none}
+  .dsec{break-inside:avoid-page}
+  table.t th{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+/* ══ v2 ══ */
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media(max-width:640px){.grid3{grid-template-columns:1fr}}
+.feats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:960px){.feats{grid-template-columns:1fr 1fr}}
+@media(max-width:520px){.feats{grid-template-columns:1fr}}
+.feat{background:#fff;border:1px solid var(--linea);border-radius:14px;padding:16px;border-top:4px solid var(--c)}
+.feat .pi{width:38px;height:38px;border-radius:11px;background:color-mix(in srgb,var(--c) 14%,#fff);color:var(--c);display:grid;place-items:center;margin-bottom:10px}
+.feat b{display:block;font-family:var(--display);font-size:17px;margin-bottom:3px}
+.feat span{display:block;font-size:13.5px;color:var(--gris);line-height:1.45}
+.importbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:var(--tinta);color:#EAF1F7;border-radius:var(--r);padding:14px 16px;margin-bottom:18px}
+.importbar .pi{width:40px;height:40px;border-radius:11px;background:var(--brasa);display:grid;place-items:center;flex:none}
+.importbar b{display:block;font-size:15px}
+.importbar span{display:block;font-size:13.3px;color:#A9C0D4}
+.importbar .btn-dark{background:#fff;color:var(--tinta)}
+.importbar .btn-dark:hover{background:#EAF1F7}
+.inacc{border-top:1px solid var(--linea-2);margin-top:4px;padding-top:12px}
+.inacc>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--acero)}
+.inacc>summary::-webkit-details-marker{display:none}
+.inacc>summary .chev{margin-left:auto;transition:transform .2s;color:var(--acero-claro)}
+.inacc[open]>summary .chev{transform:rotate(180deg)}
+.rec{display:inline-block;font:700 11px var(--texto);background:var(--forjado-suave);color:var(--forjado);border-radius:999px;padding:2px 8px;vertical-align:2px;margin-left:4px}
+.checkgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media(max-width:560px){.checkgrid{grid-template-columns:1fr}}
+.checkgrid label{display:flex;gap:9px;align-items:center;margin:0;padding:9px 11px;border-radius:10px;background:var(--papel);font-weight:500;color:var(--tinta);cursor:pointer;font-size:14px}
+.checkgrid input{width:18px;height:18px;accent-color:var(--forjado);margin:0}
+.checkgrid label:has(input:checked){background:var(--forjado-suave)}
+.drop{display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;border:2px dashed var(--linea);border-radius:14px;padding:24px;cursor:pointer;color:var(--acero);margin:0;font-weight:500}
+.drop svg{width:30px;height:30px;color:var(--brasa)}
+.drop b{font-size:15px;color:var(--tinta)}
+.drop span{font-size:13px;color:var(--gris)}
+.drop.over,.drop:hover{border-color:var(--brasa);background:var(--brasa-suave)}
+
+
+
+/* ══ AdaptIA ══ */
+.ejs{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media(max-width:700px){.ejs{grid-template-columns:1fr}}
+.ejs button{text-align:left;background:var(--papel);border:1.5px solid transparent;border-radius:12px;padding:11px 13px}.ejs button:hover{border-color:var(--acero-claro)}
+.ejs b{display:block;font-size:14px}.ejs small{color:var(--gris);font-size:12.5px}
+.secs{display:flex;flex-direction:column;gap:6px}
+.sec{display:grid;grid-template-columns:170px 1fr 70px;gap:10px;align-items:center;background:#fff;border:1px solid var(--linea);border-radius:10px;padding:8px 12px;font-size:13.5px}
+.sec select{padding:5px 8px;border:1.5px solid var(--linea);border-radius:8px;font-size:13px}
+.sec .pv{color:var(--acero);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sec .wc{font:700 12px var(--mono);color:var(--gris);text-align:right}
+.perfil{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}@media(max-width:760px){.perfil{grid-template-columns:1fr}}
+.rule{background:#fff;border:1px solid var(--linea);border-radius:12px;padding:10px 12px}
+.rule label{font-size:12px;font-weight:700;color:var(--acero-claro);text-transform:uppercase;letter-spacing:.04em;display:flex;gap:6px;align-items:center;margin-bottom:4px}
+.rule input,.rule select{width:100%;padding:7px 9px;border:1.5px solid var(--linea);border-radius:8px;font-size:14px}
+.rule .ev{font-size:12px;color:var(--gris);margin-top:4px;font-style:italic}
+.evb{font-size:10.5px;font-weight:800;border-radius:999px;padding:1px 7px;text-transform:none;letter-spacing:0}.evb.ok{background:var(--forjado-suave);color:var(--forjado)}.evb.ko{background:#FFF1D6;color:#8A5A00}
+table.gap{width:100%;border-collapse:collapse;font-size:14px}
+table.gap th{background:var(--tinta);color:#fff;text-align:left;padding:8px 10px;font-size:12px}table.gap td{padding:8px 10px;border-bottom:1px solid var(--linea-2)}
+table.gap td.n{font-family:var(--mono);text-align:right}
+.est{font-size:11.5px;font-weight:800;border-radius:999px;padding:2px 9px;white-space:nowrap}.est.ok{background:var(--forjado-suave);color:var(--forjado)}.est.aj{background:var(--brasa-suave);color:var(--brasa)}.est.fa{background:#FFF1D6;color:#8A5A00}.est.na{background:var(--linea-2);color:var(--gris)}
+.niveles{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}@media(max-width:860px){.niveles{grid-template-columns:1fr}}
+.niveles button{text-align:left;background:#fff;border:2px solid var(--linea);border-radius:16px;padding:14px 16px;box-shadow:var(--sombra)}
+.niveles button[aria-pressed="true"]{border-color:var(--brasa);box-shadow:0 0 0 3px rgba(228,87,46,.18)}
+.niveles b{display:block;font-family:var(--display);font-size:19px}.niveles .k{font:800 11px var(--mono);color:var(--brasa);text-transform:uppercase}.niveles small{display:block;font-size:13px;color:var(--gris);margin-top:4px;line-height:1.45}
+.cambio{background:#fff;border:1px solid var(--linea);border-left:5px solid var(--forjado);border-radius:14px;margin-bottom:12px;box-shadow:var(--sombra);overflow:hidden}
+.cambio.amb{border-left-color:#F59E0B}.cambio.roj{border-left-color:var(--brasa)}
+.cambio.acep{opacity:.8}.cambio.rech{opacity:.55}
+.cambio>header{display:flex;gap:10px;align-items:center;padding:10px 14px;flex-wrap:wrap}.cambio>header b{flex:1;font-size:15px}
+.cambio .tipo{font:800 11px var(--mono);text-transform:uppercase;color:var(--acero-claro)}
+.cambio .alertas{padding:0 14px}.alerta{font-size:13px;border-radius:8px;padding:6px 10px;margin-bottom:6px}.alerta.roj{background:var(--brasa-suave);color:#7A2A12}.alerta.amb{background:#FFF8E6;color:#6B4E00}
+.diff{padding:10px 14px;font-family:Georgia,serif;font-size:14.5px;line-height:1.65;white-space:pre-wrap;border-top:1px solid var(--linea-2);max-height:360px;overflow:auto}
+.diff del{background:#FDE3DA;color:#7A2A12}.diff ins{background:#DDF3EA;color:#0B4F43;text-decoration:none}
+.cambio .acts{display:flex;gap:6px;padding:10px 14px;border-top:1px solid var(--linea-2);flex-wrap:wrap;align-items:center}
+.cambio textarea{width:100%;min-height:160px;border:0;border-top:1px solid var(--linea-2);padding:10px 14px;font-family:Georgia,serif;font-size:14.5px;line-height:1.6}
+.ref{font-size:13.5px;padding:7px 0;border-bottom:1px dashed var(--linea-2);display:grid;grid-template-columns:34px 1fr auto;gap:8px}
+.ref .n{font:800 12px var(--mono);color:var(--acero-claro)}.ref small{display:block;color:var(--gris);font-size:12px}
+.check{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--linea-2);font-size:14px}.check .ic{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:12px;flex:none}.check .ic.ok{background:var(--forjado-suave);color:var(--forjado)}.check .ic.ko{background:var(--brasa-suave);color:var(--brasa)}.check .ic.pe{background:#FFF1D6;color:#8A5A00}
+
+/* ══ AntiConvocatorIA ══ */
+/* ocho pasos: solo se muestra la etiqueta del paso actual */
+.tb-tools{flex:none}
+.stepper{overflow:hidden}
+.sdot .lbl{display:none}.sdot[data-state="now"] .lbl{display:inline}
+.stepper{justify-content:center;min-width:0}
+@media(max-width:720px){.sdot[data-state="now"] .lbl{display:none}.sline{flex:1 1 4px;min-width:2px}.sdot{padding:4px 2px}.sdot .n{width:26px;height:26px}}
+
+:root{--teal:#0E7C6B;--sello:#E4572E}
+.idea{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:960px){.idea{grid-template-columns:1fr 1fr}}
+@media(max-width:520px){.idea{grid-template-columns:1fr}}
+.idea div{background:#fff;border:1px solid var(--linea);border-radius:14px;padding:16px}
+.idea b{display:block;font-family:var(--display);font-size:17px;margin-bottom:4px}
+.idea span{font-size:13.8px;color:var(--gris);line-height:1.5;display:block}
+.idea .k{font:700 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--brasa);margin-bottom:8px}
+.idea div.yes{border-color:#A9DCCF;background:var(--forjado-suave)}
+.idea div.yes .k{color:var(--forjado)}
+.quote{margin:22px 0 0;font-family:var(--display);font-size:clamp(20px,2.6vw,28px);font-weight:700;letter-spacing:-.02em;color:#fff}
+.quote span{color:var(--brasa)}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:0 0 16px}
+.metric{background:#fff;border:1px solid var(--linea);border-radius:14px;padding:14px 16px;box-shadow:var(--sombra)}
+.metric-v{font:800 34px var(--display);letter-spacing:-.03em;line-height:1.05;color:var(--tinta)}
+.metric-v.good{color:var(--forjado)} .metric-v.warn{color:var(--brasa)} .metric-v.mid{color:#B7791F}
+.metric-l{font-weight:700;font-size:14px;margin-top:4px}
+.metric-n{font-size:12.8px;color:var(--gris);margin-top:4px;line-height:1.45}
+.substeps{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
+.substeps span{font-size:12.5px;font-weight:600;border-radius:999px;padding:5px 11px;background:var(--linea-2);color:var(--gris)}
+.substeps span.on{background:#FFF1D6;color:#8A5A00}
+.substeps span.done{background:var(--forjado-suave);color:var(--forjado)}
+.substeps span.fail{background:var(--brasa-suave);color:var(--brasa)}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-1px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.heat{border-collapse:separate;border-spacing:3px;font-size:13px;width:100%}
+.heat th{font-size:11.5px;color:var(--gris);font-weight:700;text-align:center;padding:4px;white-space:nowrap}
+.heat th.l,.heat td.l{text-align:left}
+.heat td{text-align:center;border-radius:6px;padding:7px 4px;min-width:34px}
+.heat td.l{padding:6px 8px 6px 0;min-width:170px;font-weight:600}
+.heat td.c0{background:#F3F6FA;color:#B8C5D3}
+.heat td.p{font-weight:800}
+.aband{display:flex;flex-direction:column;gap:6px}
+.aband-row{display:grid;grid-template-columns:minmax(140px,1.2fr) 2fr minmax(150px,1fr);gap:10px;align-items:center;font-size:13.5px}
+.aband-bar{height:10px;background:var(--linea-2);border-radius:6px;overflow:hidden}
+.aband-fill{height:100%;background:var(--brasa);border-radius:6px}
+.aband-n{color:var(--gris);font-size:12.5px}
+@media(max-width:600px){.aband-row{grid-template-columns:1fr}}
+.conv{background:#FBFDFE;border:1.5px solid var(--linea);border-radius:12px;margin-bottom:8px}
+.conv>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:10px 12px;flex-wrap:wrap}
+.conv>summary::-webkit-details-marker{display:none}
+.conv-year{font:700 13px var(--mono);background:var(--tinta);color:#fff;border-radius:7px;padding:3px 9px}
+.conv-meta{font-size:13px;color:var(--gris);flex:1}
+.conv-src{font-size:12px;color:var(--acero-claro);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conv-body{padding:4px 12px 12px}
+.ing{margin-top:10px;display:flex;flex-direction:column;gap:4px}
+.ing div{display:flex;gap:10px;font-size:13px;justify-content:space-between;padding:6px 10px;background:var(--papel);border-radius:8px}
+.ing .ok{color:var(--forjado);font-weight:600}.ing .err{color:var(--brasa);font-weight:600}.ing .warn{color:#B7791F;font-weight:600}
+.bp-scroll{overflow-x:auto}
+table.bp{border-collapse:separate;border-spacing:3px;width:100%;font-size:13.5px}
+table.bp th{font-size:12px;color:var(--gris);font-weight:700;padding:4px;text-align:center;white-space:nowrap}
+table.bp th.l{text-align:left}
+table.bp td.tema{font-weight:600;padding-right:8px;min-width:180px}
+table.bp td.cell{padding:0;min-width:64px}
+.bp-in{position:relative;border-radius:8px;display:flex;align-items:center;justify-content:center;height:40px}
+.bp-in input{width:48px;border:0;background:transparent;text-align:center;font:700 14px var(--texto);color:var(--tinta);padding:6px 0}
+.bp-in input:focus{box-shadow:none;background:rgba(255,255,255,.7);border-radius:6px}
+.bp-in.dark input{color:#fff}
+.bp-in.sel{outline:2.5px solid var(--brasa);outline-offset:-2px}
+.bp-hits{position:absolute;top:-7px;right:-5px;background:var(--brasa);color:#fff;border-radius:999px;font:700 10.5px var(--texto);padding:1px 6px}
+.bp-peso{width:64px!important;padding:8px!important;text-align:center;font-weight:700}
+.deuda{display:inline-block;height:8px;border-radius:4px;background:var(--brasa);vertical-align:1px;margin-right:8px}
+.deuda-0{background:var(--linea)}
+.rowsum{font-size:11.5px;color:var(--gris);text-align:center}
+.rowsum.bad{color:var(--brasa);font-weight:700}
+.legend{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--gris);margin-top:10px}
+.legend-bar{width:90px;height:8px;border-radius:4px;background:linear-gradient(90deg,rgba(14,124,107,.05),rgba(14,124,107,.8))}
+.acta{background:var(--tinta);color:#EAF1F7;border-radius:18px;padding:22px;margin-bottom:16px;box-shadow:var(--sombra-alta);position:relative;overflow:hidden}
+.acta::after{content:"";position:absolute;right:-60px;top:-60px;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle,rgba(228,87,46,.35),transparent 65%)}
+.acta>*{position:relative;z-index:1}
+.acta h3{font-family:var(--display);font-size:22px;margin:0}
+.acta .sub{font-size:13px;color:#A9C0D4;margin:2px 0 14px}
+.acta dl{display:grid;grid-template-columns:150px 1fr;gap:6px 14px;margin:0;font-size:14px}
+.acta dt{color:#8FA7BE;font-weight:600}
+.acta dd{margin:0;word-break:break-all}
+.acta code{background:#1B3350;color:#9FE3D4;font-size:12.5px}
+@media(max-width:600px){.acta dl{grid-template-columns:1fr}}
+.intentos{margin-top:16px;display:flex;flex-direction:column;gap:6px}
+.intento{display:grid;grid-template-columns:78px 1fr 52px;gap:10px;align-items:center;font-size:12.5px}
+.intento .track{position:relative;height:10px;background:#1E3550;border-radius:6px}
+.intento .fill{position:absolute;left:0;top:0;bottom:0;border-radius:6px}
+.intento .lim{position:absolute;top:-4px;bottom:-4px;width:2px;background:#F5BF4F}
+.intento .exp{position:absolute;top:-4px;bottom:-4px;width:2px;background:#8FA7BE}
+.intento .v{text-align:right;font-weight:700}
+.tagx{display:inline-block;font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 8px;background:var(--linea-2);color:var(--acero);margin:1px 2px}
+.tagx.t{background:var(--forjado-suave);color:var(--forjado)}
+.tagx.a{background:var(--brasa-suave);color:var(--brasa)}
+.paper{background:#fff;border:1px solid var(--linea);border-radius:18px;box-shadow:var(--sombra-alta);padding:34px 38px;max-width:880px;margin:0 auto}
+@media(max-width:700px){.paper{padding:20px 16px}}
+.paper-head{border-bottom:3px solid var(--tinta);padding-bottom:14px;margin-bottom:16px}
+.paper-head h3{font-family:var(--display);font-size:28px;margin:0 0 4px;letter-spacing:-.02em}
+.paper-head .pm{font-size:13.5px;color:var(--gris)}
+.q{padding:14px 0;border-bottom:1px solid var(--linea-2)}
+.q:last-child{border-bottom:0}
+.q-top{display:flex;gap:10px}
+.q-n{font:800 16px var(--display);flex:none;min-width:24px}
+.q-text{white-space:pre-wrap;flex:1}
+.q-pts{flex:none;font-size:12.5px;color:var(--gris);white-space:nowrap}
+.opts{margin:8px 0 0 34px;display:flex;flex-direction:column;gap:4px;font-size:14.5px}
+.opts .ok{color:var(--forjado);font-weight:700}
+.q-meta{margin:10px 0 0 34px}
+.variantes{margin:10px 0 0 34px;background:var(--papel);border-radius:10px;padding:10px 12px;font-size:13.5px}
+.variantes .vt{font-weight:700;color:var(--acero);margin-bottom:4px;font-size:12.5px}
+.variantes .vi{padding:5px 0;border-top:1px dashed var(--linea)}
+.variantes .vi:first-of-type{border-top:0}
+.crit{margin:8px 0 0 34px;font-size:13.5px;border-left:3px solid var(--forjado);padding:6px 10px;background:var(--forjado-suave);border-radius:0 8px 8px 0}
+.carta{background:#fff;border:1px solid var(--linea);border-radius:18px;box-shadow:var(--sombra-alta);padding:34px 40px;max-width:760px;margin:0 auto;font-size:16.5px;line-height:1.65}
+.carta p{margin:0 0 14px}
+@media(max-width:700px){.carta{padding:22px 18px}}
+.pubbox{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;justify-content:center}
+.stale{background:#FFF8E6;border:1px solid #F3DDA0;color:#6B4E00;border-radius:12px;padding:11px 15px;font-size:14px;margin-bottom:14px}
+.verify-ok{background:var(--forjado-suave);color:#0B5A4E;border-radius:12px;padding:12px 14px;font-weight:600}
+.verify-ko{background:var(--brasa-suave);color:var(--aviso);border-radius:12px;padding:12px 14px;font-weight:600}
+.keyhide{font-family:var(--mono);letter-spacing:.1em}
+@media print{
+  .noprint,.acta .intentos{display:none!important}
+  .screen.on{display:block!important}
+  .paper,.carta{box-shadow:none;border:0;padding:0}
+}
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m10 8 6 4-6 4z"/></symbol>
+  <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/></symbol>
+  <symbol id="i-quiz" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8M13 12h8M13 18h8"/></symbol>
+  <symbol id="i-cards" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6M10 22h4"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></symbol>
+  <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 3v4M17 5h4M5 17v4M3 19h4"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></symbol>
+  <symbol id="i-form" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-tablet" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M12 18h.01"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M12 18h.01"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M6 14l1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h7M9 11h5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="i-print" viewBox="0 0 24 24"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></symbol>
+  <symbol id="i-scale" viewBox="0 0 24 24"><path d="M12 3v18M7 21h10M5 7h14M5 7l-3 7a3 3 0 0 0 6 0zM19 7l-3 7a3 3 0 0 0 6 0z"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+  <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/></symbol>
+</svg>
+
+<div class="topbar">
+  <div class="tb-in">
+    <button class="logo" id="goHome" type="button" aria-label="Ir al inicio"><span class="anv"><svg class="i"><use href="#i-doc"/></svg></span><span>Adapt<em>IA</em></span></button>
+    <nav class="stepper" id="stepper" aria-label="Pasos"></nav>
+    <div class="tb-tools"><button class="tb-btn" id="btnPerfiles" type="button"><svg class="i"><use href="#i-archive"/></svg><span class="lbl">Perfiles de revista</span></button><button class="tb-btn" id="btnAjustes" type="button"><svg class="i"><use href="#i-key"/></svg><span class="lbl">Clave</span></button><button class="tb-btn" id="btnHelp" type="button"><svg class="i"><use href="#i-help"/></svg><span class="lbl">Ayuda</span></button></div>
+  </div>
+  <div class="progress"><span id="progBar"></span></div>
+</div>
+
+<main id="app">
+<!-- ═════ 0 · INICIO ═════ -->
+<section class="screen" data-step="0">
+  <div class="hero">
+    <p class="eyebrow">Asistente de envío a revista · copiloto de publicación científica · Universidad Miguel Hernández de Elche</p>
+    <h1>Tu artículo, adaptado a la revista <em>sin tocar la ciencia</em></h1>
+    <p class="lede">Subes el manuscrito y las normas de la revista. AdaptIA construye el perfil editorial, compara ambos y te enseña qué hay que cambiar antes de tocar nada. Después propone solo los cambios necesarios, cada uno con un diff que tú aceptas o rechazas. Convierte las referencias verificándolas en Crossref y prepara el paquete de envío.</p>
+    <div class="actions">
+      <button class="btn btn-primary btn-big" id="btnStart" type="button"><svg class="i"><use href="#i-play"/></svg>Adaptar mi artículo</button>
+      <button class="btn btn-ghost btn-big" id="btnDemo" type="button"><svg class="i"><use href="#i-eye"/></svg>Ver una adaptación de ejemplo</button>
+    </div>
+    <p class="quote">Cambia la forma; <span>la ciencia la decides tú.</span></p>
+  </div>
+  <h2 class="sec-title">Dos tipos de cambio</h2>
+  <div class="idea" style="grid-template-columns:1fr 1fr">
+    <div><p class="k" style="color:var(--forjado)">Editorial · permitido</p><b>Forma y cumplimiento</b><span>Estructura, títulos de sección, longitud, resumen, palabras clave, estilo, formato de referencias y declaraciones.</span></div>
+    <div><p class="k" style="color:var(--brasa)">Científico · requiere tu permiso</p><b>Lo que dice el artículo</b><span>Cifras, muestras, valores p, métodos, conclusiones, fuerza de las afirmaciones y referencias. La app lo vigila con código.</span></div>
+  </div>
+  <h2 class="sec-title">Siete agentes</h2>
+  <div class="journey" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+    <div class="jstop" style="--c:#1F6FB2"><span class="jn">1</span><div class="ji"><svg class="i"><use href="#i-book"/></svg></div><b>Analista editorial</b><span>Normas → perfil, cada regla con su cita.</span></div>
+    <div class="jstop" style="--c:#6B4FD8"><span class="jn">2</span><div class="ji"><svg class="i"><use href="#i-doc"/></svg></div><b>Analista del manuscrito</b><span>Secciones, recuentos, citas y referencias.</span></div>
+    <div class="jstop" style="--c:#0E8C7A"><span class="jn">3</span><div class="ji"><svg class="i"><use href="#i-scale"/></svg></div><b>Cumplimiento</b><span>Qué cumple y qué no, antes de tocar nada.</span></div>
+    <div class="jstop" style="--c:#C98200"><span class="jn">4-5</span><div class="ji"><svg class="i"><use href="#i-pencil"/></svg></div><b>Editor y redactor</b><span>Planifican y reescriben solo lo necesario.</span></div>
+    <div class="jstop" style="--c:#1F6FB2"><span class="jn">6</span><div class="ji"><svg class="i"><use href="#i-bookmark"/></svg></div><b>Referencias</b><span>Crossref, estilo de la revista y citas en el texto.</span></div>
+    <div class="jstop" style="--c:#E4572E"><span class="jn">7</span><div class="ji"><svg class="i"><use href="#i-shield"/></svg></div><b>Auditor final</b><span>Cifras, afirmaciones y citas, cambio a cambio.</span></div>
+  </div>
+</section>
+
+<!-- ═════ 1 · MANUSCRITO ═════ -->
+<section class="screen" data-step="1">
+  <header class="sh" style="--c:#6B4FD8"><div class="sh-ico"><svg class="i"><use href="#i-doc"/></svg></div>
+    <div><p class="sh-step">Paso 1 de 6</p><h2>Tu manuscrito</h2><p class="sh-lede">Word, PDF o texto. La app reconoce las secciones por sus títulos; comprueba que las ha asignado bien.</p></div></header>
+  <div class="cols">
+    <div>
+      <div class="card">
+        <label class="drop" id="mDrop" tabindex="0"><svg class="i"><use href="#i-upload"/></svg><b>Arrastra aquí el manuscrito</b><span>Word (.docx), PDF, Markdown o texto</span><input type="file" id="mFile" accept=".docx,.pdf,.txt,.md" hidden></label>
+        <details class="inacc" style="margin-top:10px"><summary><svg class="i"><use href="#i-pencil"/></svg><span>…o pega el texto</span><svg class="i chev"><use href="#i-down"/></svg></summary><textarea id="mPegado" style="margin-top:8px;min-height:160px"></textarea><button class="btn btn-dark btn-sm" id="mPegar" type="button" style="margin-top:8px">Analizar este texto</button></details>
+        <p class="help" id="mInfo" style="margin:10px 0 0"></p>
+      </div>
+      <div class="card"><h3><svg class="i"><use href="#i-grid"/></svg>Secciones reconocidas</h3><p class="sub">Corrige cualquier asignación: es la base de todo lo demás.</p><div class="secs" id="secs"><p class="empty">Aún no hay manuscrito.</p></div></div>
+    </div>
+    <aside class="card sticky"><h3><svg class="i"><use href="#i-target"/></svg>Lo que ha medido</h3><div id="mMetrics" class="help" style="font-size:14px;line-height:1.8">—</div></aside>
+  </div>
+</section>
+
+<!-- ═════ 2 · REVISTA ═════ -->
+<section class="screen" data-step="2">
+  <header class="sh" style="--c:#1F6FB2"><div class="sh-ico"><svg class="i"><use href="#i-book"/></svg></div>
+    <div><p class="sh-step">Paso 2 de 6</p><h2>La revista</h2><p class="sh-lede">Busca la revista, abre sus normas para autores y pégalas o sube el PDF guardado. El perfil que se extrae es editable: cada regla muestra la frase de las normas en que se basa.</p></div></header>
+  <div class="cols">
+    <div>
+      <div class="card">
+        <div class="grid2"><div class="field"><label for="jNombre">Revista</label><div class="keyrow"><input type="text" id="jNombre" placeholder="International Journal of Emergency Medicine"><button class="btn btn-ghost btn-sm" id="jBuscar" type="button">Buscar</button></div></div><div class="field"><label for="jTipo">Tipo de artículo</label><input type="text" id="jTipo" value="Original research"></div></div>
+        <div id="jInfo"></div>
+        <label class="drop" id="jDrop" tabindex="0" style="padding:16px"><svg class="i"><use href="#i-upload"/></svg><b>Normas para autores</b><span>PDF o HTML guardado desde la web de la revista</span><input type="file" id="jFile" accept=".pdf,.html,.htm,.txt,.md" hidden></label>
+        <div class="field" style="margin:10px 0 0"><label for="jTexto">…o pega aquí el texto de las normas</label><textarea id="jTexto" style="min-height:140px;font-size:13px"></textarea></div>
+        <div class="actions" style="margin-top:10px"><button class="btn btn-dark btn-sm" id="jExtraer" type="button"><svg class="i"><use href="#i-sparkles"/></svg>Extraer el perfil de la revista</button><span class="help" id="jEstado" style="margin:0"></span></div>
+      </div>
+      <div class="card"><h3><svg class="i"><use href="#i-sliders"/></svg>Perfil editorial</h3><div id="perfil"><p class="empty">Aún no hay perfil. Extráelo de las normas o elige uno guardado en «Perfiles de revista».</p></div></div>
+    </div>
+    <aside class="card sticky"><h3><svg class="i"><use href="#i-bulb"/></svg>Por qué no se descargan solas</h3><p class="sub">Un navegador no puede leer webs de terceros y cada revista cambia sus normas. Pegarlas asegura que usas las vigentes y las del tipo de artículo que envías.</p><p class="sub" style="margin:0">Una vez extraído y revisado, el perfil se guarda: la próxima vez con esa revista no hay que repetirlo. También puedes exportarlo y compartirlo con tu grupo.</p></aside>
+  </div>
+</section>
+
+<!-- ═════ 3 · DIAGNÓSTICO ═════ -->
+<section class="screen" data-step="3">
+  <header class="sh" style="--c:#0E8C7A"><div class="sh-ico"><svg class="i"><use href="#i-scale"/></svg></div>
+    <div><p class="sh-step">Paso 3 de 6</p><h2>Qué hay que cambiar</h2><p class="sh-lede">Comparación entre tu manuscrito y el perfil de la revista, calculada con código. Todavía no se ha tocado nada.</p></div></header>
+  <div class="card"><table class="gap"><thead><tr><th>Elemento</th><th style="text-align:right">Manuscrito</th><th style="text-align:right">Revista</th><th>Estado</th><th>Acción</th></tr></thead><tbody id="gapBody"></tbody></table></div>
+  <div class="cols">
+    <div class="card"><h3><svg class="i"><use href="#i-bookmark"/></svg>Citas y referencias</h3><div id="refDiag" class="help" style="font-size:14px;line-height:1.7"></div></div>
+    <aside class="card sticky"><h3><svg class="i"><use href="#i-sliders"/></svg>¿Hasta dónde?</h3><div class="niveles" id="niveles" style="grid-template-columns:1fr"></div><label style="display:flex;gap:8px;font-size:13.5px;margin-top:10px"><input type="checkbox" id="optIngles"> Pulir la redacción científica en inglés (solo nivel Edición o Paquete)</label></aside>
+  </div>
+</section>
+
+<!-- ═════ 4 · ADAPTACIÓN ═════ -->
+<section class="screen" data-step="4">
+  <header class="sh" style="--c:#E4572E"><div class="sh-ico"><svg class="i"><use href="#i-sparkles"/></svg></div>
+    <div><p class="sh-step">Paso 4 de 6</p><h2>Preparando los cambios</h2><p class="sh-lede">Cada agente trabaja solo en lo que le toca. Nada se aplica hasta que lo revises.</p></div></header>
+  <div class="card"><div style="height:8px;background:var(--linea-2);border-radius:5px;overflow:hidden"><i id="adBar" style="display:block;height:100%;width:0;background:var(--brasa);transition:width .4s"></i></div><div id="adLog" style="margin-top:12px;font-size:14px;line-height:1.8"></div></div>
+</section>
+
+<!-- ═════ 5 · REVISIÓN ═════ -->
+<section class="screen" data-step="5">
+  <header class="sh" style="--c:#C98200"><div class="sh-ico"><svg class="i"><use href="#i-eye"/></svg></div>
+    <div><p class="sh-step">Paso 5 de 6</p><h2>Revisa cada cambio</h2><p class="sh-lede" id="revLede">Verde: editorial. Ámbar: revisa. Rojo: el auditor ha detectado un posible cambio científico y no se aplicará salvo que lo aceptes expresamente.</p></div></header>
+  <div class="actions" style="margin-bottom:12px"><button class="btn btn-ghost btn-sm" id="aceptarVerdes" type="button"><svg class="i"><use href="#i-check"/></svg>Aceptar todos los verdes</button><span class="help" id="revCuenta" style="margin:0"></span></div>
+  <div id="cambios"></div>
+</section>
+
+<!-- ═════ 6 · RESULTADO ═════ -->
+<section class="screen" data-step="6">
+  <header class="sh" style="--c:#0E8C7A"><div class="sh-ico"><svg class="i"><use href="#i-check"/></svg></div>
+    <div><p class="sh-step">Paso 6 de 6</p><h2 id="resTitle">Listo para enviar</h2><p class="sh-lede" id="resLede"></p></div></header>
+  <div class="cols">
+    <div>
+      <div class="card"><h3><svg class="i"><use href="#i-check"/></svg>Lista de comprobación de la revista</h3><div id="checklist"></div></div>
+      <div class="card"><h3><svg class="i"><use href="#i-flame"/></svg>Pendiente de ti</h3><div id="pendientes"></div></div>
+    </div>
+    <aside class="card sticky">
+      <h3><svg class="i"><use href="#i-download"/></svg>Documentos</h3>
+      <div class="actions" style="flex-direction:column;align-items:stretch">
+        <button class="btn btn-word btn-sm" id="expDocx" type="button">Manuscrito adaptado (Word)</button>
+        <button class="btn btn-ghost btn-sm" id="expInforme" type="button"><svg class="i"><use href="#i-download"/></svg>Informe de cambios (.md)</button>
+        <button class="btn btn-ghost btn-sm" id="expPaquete" type="button"><svg class="i"><use href="#i-download"/></svg>Paquete de envío (Word)</button>
+        <button class="btn btn-ghost btn-sm" id="expPerfil" type="button"><svg class="i"><use href="#i-download"/></svg>Perfil de la revista (.json)</button>
+      </div>
+      <p class="help" id="resNota">El Word conserva el texto y la estructura; revisa tablas y figuras, que se mantienen como marcadores.</p>
+    </aside>
+  </div>
+</section>
+</main>
+
+<footer><hr><p>AdaptIA · Fernando Borrás Rocher · Universidad Miguel Hernández de Elche. Asistente editorial: la responsabilidad del contenido y del envío es de los autores. El manuscrito se procesa en tu navegador; con clave, los fragmentos necesarios viajan a OpenAI y las referencias se consultan en Crossref.</p></footer>
+
+<div class="bottomnav"><div class="bn-in">
+  <button class="btn btn-ghost" id="navBack" type="button"><svg class="i"><use href="#i-left"/></svg>Atrás</button>
+  <div class="bn-hint" id="navHint"></div>
+  <button class="btn btn-primary" id="navNext" type="button"><span id="navNextTxt">Siguiente</span><svg class="i"><use href="#i-right"/></svg></button>
+</div></div>
+<div class="modal" id="mPerfiles" role="dialog" aria-modal="true" aria-labelledby="mPfT"><div class="modal-box"><div class="modal-head"><h2 id="mPfT">Perfiles de revista</h2><button type="button" data-close>Cerrar</button></div><div class="modal-body"><p class="help" style="margin-top:0">Los perfiles revisados se guardan en este navegador. Puedes exportarlos para tu grupo e importarlos.</p><div id="perfiles"></div><div class="actions" style="margin-top:12px"><label class="btn btn-ghost btn-sm" for="pfImport" style="cursor:pointer"><svg class="i"><use href="#i-upload"/></svg>Importar perfil (.json)</label><input type="file" id="pfImport" accept=".json" hidden></div></div></div></div>
+<div class="modal" id="mAjustes" role="dialog" aria-modal="true" aria-labelledby="mAjT"><div class="modal-box"><div class="modal-head"><h2 id="mAjT">Clave de OpenAI</h2><button type="button" data-close>Cerrar</button></div><div class="modal-body"><p class="sub" style="margin-top:0">Necesaria para extraer el perfil y proponer cambios de redacción. El diagnóstico, la conversión de referencias y la lista de comprobación funcionan sin ella. Se guarda solo en este navegador.</p><div class="keyrow"><input type="password" id="apiKey" placeholder="sk-proj-…" autocomplete="off"><button class="eye" id="btnEye" type="button" aria-label="Mostrar u ocultar"><svg class="i"><use href="#i-eye"/></svg></button></div><div class="field" style="margin-top:12px"><label for="modelo">Modelo</label><select id="modelo"><option value="gpt-6-luna">gpt-6-luna (recomendado)</option><option value="gpt-4.1">gpt-4.1</option><option value="gpt-4.1-mini">gpt-4.1-mini</option></select></div><div class="field"><label for="correo">Tu correo para Crossref <small>(recomendado)</small></label><input type="email" id="correo" placeholder="nombre@universidad.es"></div></div></div></div>
+<div class="modal" id="mHelp" role="dialog" aria-modal="true" aria-labelledby="mHelpT"><div class="modal-box"><div class="modal-head"><h2 id="mHelpT">Ayuda</h2><button type="button" data-close>Cerrar</button></div><div class="modal-body"><div class="glos" id="glos"></div></div></div></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+"use strict";
+/* ══════════════════════════════════════════════════════════
+   AdaptIA · asistente de envío a revista
+   Fernando Borrás Rocher · Universidad Miguel Hernández de Elche
+   ══════════════════════════════════════════════════════════ */
+const $ = id => document.getElementById(id), $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ico = n => `<svg class="i"><use href="#i-${n}"/></svg>`;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+const nPal = t => (String(t || '').match(/[\p{L}\p{N}][\p{L}\p{N}'’\-.%]*/gu) || []).length;
+const uid = p => p + Math.random().toString(36).slice(2, 8);
+function toast(m, ms = 3800){ const t = $('toast'); t.textContent = m; t.classList.add('on'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), ms); }
+function dl(n, c, t){ const b = c instanceof Blob ? c : new Blob([c], {type:t}); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = n; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 1500); }
+function cargaLib(urls){ return urls.reduce((p,u) => p.catch(() => new Promise((ok,ko) => { const s = document.createElement('script'); s.src = u; s.onload = ok; s.onerror = () => { s.remove(); ko(); }; document.head.appendChild(s); })), Promise.reject()).catch(() => { throw new Error('No se pudo cargar una librería: ¿hay conexión?'); }); }
+
+/* ══════════ ESTADO ══════════ */
+const S = {segs:[], nombreFichero:'', perfil:null, normas:'', nivel:'formato', cambios:[], refs:null, final:null, _demo:false};
+
+/* ══════════ SECCIONES ══════════ */
+const SEC = {titulo:'Título', autores:'Autores', resumen:'Resumen', palabras_clave:'Palabras clave', introduccion:'Introducción', metodos:'Métodos', resultados:'Resultados', discusion:'Discusión', conclusiones:'Conclusiones', agradecimientos:'Agradecimientos', financiacion:'Financiación', conflicto:'Conflicto de intereses', etica:'Aprobación ética', datos:'Disponibilidad de datos', contribuciones:'Contribuciones de los autores', registro:'Registro del ensayo', referencias:'Referencias', tablas:'Tablas', figuras:'Figuras', otra:'Otra'};
+const CUERPO = ['introduccion','metodos','resultados','discusion','conclusiones'];
+const DECL = ['etica','conflicto','financiacion','datos','contribuciones','registro'];
+const HEAD = [['resumen',/^(abstract|resumen|summary)$/],['palabras_clave',/^(key ?words|palabras clave|index terms)$/],['introduccion',/^(introduction|introduccion|background|antecedentes)$/],['metodos',/^((materials? and |patients and |subjects and )?methods?|methodology|material(es)? y metodos|metodos?|metodologia|pacientes y metodos)$/],['resultados',/^(results?|resultados)$/],['discusion',/^(discussion|discusion)$/],['conclusiones',/^(conclusions?|conclusiones?)$/],['agradecimientos',/^(acknowledge?ments?|agradecimientos?)$/],['financiacion',/^(funding|funding sources?|financial support|financiacion|fuentes? de financiacion)$/],['conflicto',/^(conflicts? of interests?|competing interests?|declaration of (competing )?interests?|disclosures?|conflictos? de intere(s|ses))$/],['etica',/^(ethics|ethical approval|ethics approval( and consent to participate)?|ethics statement|aspectos eticos|aprobacion etica|consideraciones eticas)$/],['datos',/^(data availability( statement)?|availability of data( and materials)?|disponibilidad de (los )?datos)$/],['contribuciones',/^(authors?'? contributions?|author contributions?|contribucion(es)? de (los )?autores)$/],['registro',/^(trial registration|registro( del ensayo)?)$/],['referencias',/^(references|bibliography|literature cited|referencias( bibliograficas)?|bibliografia)$/],['tablas',/^(tables?|tablas?)$/],['figuras',/^(figure legends|figures?|figuras?|leyendas de (las )?figuras)$/]];
+function claveDe(linea){ const l = norm(linea).replace(/^(\d+(\.\d+)*\.?|[ivx]+\.)\s*/, '').replace(/[:.]$/, '').trim(); if(l.length > 60) return null; for(const [k,rx] of HEAD) if(rx.test(l)) return k; return null; }
+function segmenta(texto){
+  const lineas = texto.replace(/\r/g, '').split('\n'), segs = []; let cur = null;
+  const nuevo = (clave, heading) => { cur = {id:uid('s'), clave, heading, text:''}; segs.push(cur); };
+  for(let raw of lineas){
+    const l = raw.trim(); if(!l){ if(cur) cur.text += '\n'; continue; }
+    const m = l.match(/^([A-Za-zÁÉÍÓÚáéíóúñ' ]{3,40}):\s+(.{10,})$/), kIn = m && claveDe(m[1]);
+    const k = claveDe(l);
+    if(k){ nuevo(k, l.replace(/[:.]$/, '')); continue; }
+    if(kIn && ['resumen','palabras_clave','financiacion','conflicto','etica','datos','contribuciones','registro'].includes(kIn)){ nuevo(kIn, m[1]); cur.text += m[2] + '\n'; continue; }
+    if(!cur){ nuevo('titulo', 'Título'); cur.text = l + '\n'; nuevo('autores', 'Autores'); continue; }
+    cur.text += l + '\n';
+  }
+  segs.forEach(s => s.text = s.text.replace(/\n{3,}/g, '\n\n').trim());
+  return segs.filter(s => s.text || s.clave === 'titulo');
+}
+const seg = k => S.segs.filter(s => s.clave === k);
+const txt = (k, segs = S.segs) => segs.filter(s => s.clave === k).map(s => s.text).join('\n\n');
+
+/* ══════════ FICHEROS ══════════ */
+async function leeArchivo(f){
+  const ext = f.name.split('.').pop().toLowerCase();
+  if(ext === 'pdf'){ if(!window.pdfjsLib) await cargaLib(['https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js']); pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; const pdf = await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise; let t = ''; for(let p = 1; p <= pdf.numPages; p++){ const c = await (await pdf.getPage(p)).getTextContent(); let y = null; c.items.forEach(i => { const yy = Math.round(i.transform[5]); if(y !== null && Math.abs(yy - y) > 2) t += '\n'; t += i.str; y = yy; }); t += '\n\n'; } if(t.replace(/\s/g, '').length < 100) throw new Error('el PDF no tiene texto seleccionable'); return t; }
+  if(ext === 'docx'){ if(!window.mammoth) await cargaLib(['https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js']); const html = (await mammoth.convertToHtml({arrayBuffer:await f.arrayBuffer()})).value; const d = new DOMParser().parseFromString(html, 'text/html'); return [...d.body.children].map(e => e.tagName === 'TABLE' ? '[TABLA]' : e.tagName === 'UL' || e.tagName === 'OL' ? [...e.querySelectorAll('li')].map(li => '- ' + li.textContent).join('\n') : e.textContent).join('\n\n'); }
+  if(/^html?$/.test(ext)) return new DOMParser().parseFromString(await f.text(), 'text/html').body.innerText;
+  return await f.text();
+}
+function subida(dropId, inputId, fn){ const d = $(dropId); ['dragenter','dragover'].forEach(ev => d.addEventListener(ev, e => { e.preventDefault(); d.classList.add('over'); })); ['dragleave','drop'].forEach(ev => d.addEventListener(ev, e => { e.preventDefault(); d.classList.remove('over'); })); d.addEventListener('drop', e => e.dataTransfer.files[0] && fn(e.dataTransfer.files[0])); $(inputId).onchange = e => { e.target.files[0] && fn(e.target.files[0]); e.target.value = ''; }; }
+subida('mDrop', 'mFile', async f => { try{ $('mInfo').innerHTML = '<span class="spin"></span> Leyendo…'; cargaManuscrito(await leeArchivo(f), f.name); }catch(e){ $('mInfo').textContent = 'No se pudo leer: ' + e.message; } });
+$('mPegar').onclick = () => { const t = $('mPegado').value.trim(); if(nPal(t) < 150) return toast('Pega el manuscrito completo'); cargaManuscrito(t, 'texto pegado'); };
+function cargaManuscrito(t, nombre){ S.segs = segmenta(t); S.nombreFichero = nombre; S.cambios = []; S.refs = null; S.final = null; S._demo = false; S.original = t; pintaSecs(); const n = CUERPO.filter(k => seg(k).length).length; $('mInfo').textContent = `${nombre} · ${nPal(t).toLocaleString('es')} palabras · ${S.segs.length} bloques${n < 3 ? ' · pocas secciones reconocidas: revisa la asignación' : ''}`; updateNav(); }
+
+/* ══════════ MEDIDAS DEL MANUSCRITO ══════════ */
+function parseRefs(t){
+  const L = t.split('\n').map(l => l.trim()).filter(Boolean), out = [];
+  for(const l of L){ const m = l.match(/^\[?(\d{1,3})[\].)]\s+(.*)$/); if(m) out.push({n:+m[1], raw:m[2]}); else if(out.length && (!/^[A-ZÁÉÍÓÚ][^\s,]{1,30},? [A-Z]/.test(l) || l.length < 25) && !/\(\d{4}[a-z]?\)/.test(l.slice(0, 120))) out[out.length - 1].raw += ' ' + l; else out.push({n:out.length + 1, raw:l}); }
+  return out.map((r,i) => ({...r, i, doi:(r.raw.match(/10\.\d{4,9}\/[^\s;,)]+[^\s;,).]/) || [''])[0], anio:(r.raw.match(/\b(19|20)\d{2}\b/) || [''])[0], apellido:(r.raw.match(/^([A-ZÁÉÍÓÚÑa-záéíóúñ'’\-]+(?: [a-z]{1,3} [A-Z][a-zA-Z'’\-]+)?)/) || ['', ''])[1]}));
+}
+const RX_NUM = /\[(\d{1,3}(?:\s*[-–,]\s*\d{1,3})*)\]/g;
+const RX_AY = /\(([A-ZÁÉÍÓÚ][^()]{1,160}?\b(?:19|20)\d{2}[a-z]?(?:\s*;[^()]{1,160}?\b(?:19|20)\d{2}[a-z]?)*)\)/g;
+const RX_AYN = /\b([A-ZÁÉÍÓÚ][a-záéíóúñ'’\-]+)(?: et al\.?| (?:and|y|&) [A-ZÁÉÍÓÚ][a-záéíóúñ'’\-]+)? \(((?:19|20)\d{2}[a-z]?)\)/g;
+const expandeNum = s => { const o = []; s.split(/\s*,\s*/).forEach(p => { const m = p.match(/(\d+)\s*[-–]\s*(\d+)/); if(m){ for(let i = +m[1]; i <= +m[2] && i - +m[1] < 60; i++) o.push(i); } else if(+p) o.push(+p); }); return o; };
+function estiloCitas(t){ const n = (t.match(RX_NUM) || []).length, a = (t.match(RX_AY) || []).length + (t.match(RX_AYN) || []).length; return n > a ? 'numerado' : a > 0 ? 'autor-año' : 'ninguno'; }
+function familiaRefs(refs){ if(!refs.length) return '—'; const ay = refs.filter(r => /^[A-ZÁÉÍÓÚ][^,]{1,40}, [A-Z]\.[\s\S]{0,200}\((19|20)\d{2}[a-z]?\)/.test(r.raw)).length; return ay > refs.length / 2 ? 'autor-año' : 'numerado'; }
+function medir(segs = S.segs){
+  const cuerpo = CUERPO.map(k => txt(k, segs)).join('\n'), res = txt('resumen', segs), kw = txt('palabras_clave', segs), refsT = txt('referencias', segs), todo = segs.map(s => s.text).join('\n');
+  const refs = parseRefs(refsT), tit = txt('titulo', segs).split('\n')[0] || '';
+  const maxN = rx => Math.max(0, ...[...todo.matchAll(rx)].map(m => +m[1]));
+  const citas = []; for(const m of cuerpo.matchAll(RX_NUM)) citas.push(...expandeNum(m[1]));
+  return {palabras:nPal(cuerpo), resumen:nPal(res), resumenEstr:/(^|\n)\s*(background|objective|aims?|methods?|results?|conclusions?|introducci[oó]n|objetivos?|m[eé]todos|resultados|conclusiones)\s*:/i.test(res), kw:kw ? kw.split(/[;,·•\n]/).map(x => x.trim()).filter(Boolean).length : 0, refs:refs.length, refsList:refs, familia:familiaRefs(refs), citas:estiloCitas(cuerpo), citasNum:[...new Set(citas)], tablas:maxN(/\bTab(?:le|la)\s+(\d{1,2})\b/gi), figuras:maxN(/\bFig(?:ure|ura|\.)?\s*(\d{1,2})\b/gi), titulo:tit.length, decl:Object.fromEntries(DECL.map(k => [k, segs.some(s => s.clave === k && s.text.trim())]))};
+}
+function pintaSecs(){
+  $('secs').innerHTML = S.segs.length ? S.segs.map((s,i) => `<div class="sec"><select data-i="${i}" aria-label="Sección del bloque ${i + 1}">${Object.entries(SEC).map(([k,t]) => `<option value="${k}" ${s.clave === k ? 'selected' : ''}>${t}</option>`).join('')}</select><span class="pv" title="${esc(s.text.slice(0, 300))}"><b>${esc(s.heading)}</b> · ${esc(s.text.slice(0, 110))}</span><span class="wc">${nPal(s.text)}</span></div>`).join('') : '<p class="empty">Aún no hay manuscrito.</p>';
+  $$('#secs [data-i]').forEach(x => x.onchange = () => { S.segs[+x.dataset.i].clave = x.value; S.cambios = []; pintaSecs(); });
+  if(!S.segs.length) return;
+  const m = medir();
+  $('mMetrics').innerHTML = `Texto principal: <b>${m.palabras.toLocaleString('es')}</b> palabras<br>Resumen: <b>${m.resumen}</b> palabras${m.resumenEstr ? ' (estructurado)' : ''}<br>Palabras clave: <b>${m.kw}</b><br>Referencias: <b>${m.refs}</b> (${m.familia}) · citas ${m.citas}<br>Tablas: <b>${m.tablas}</b> · figuras: <b>${m.figuras}</b><br>Título: <b>${m.titulo}</b> caracteres<br>Declaraciones: ${DECL.filter(k => m.decl[k]).map(k => SEC[k].toLowerCase()).join(', ') || 'ninguna'}`;
+}
+
+/* ══════════ IA ══════════ */
+async function ia(sys, user, {max = 3000, json = true} = {}){
+  const key = localStorage.getItem('ia_openai_key'); if(!key) throw new Error('Falta la clave de OpenAI (botón «Clave», arriba).');
+  const modelo = localStorage.getItem('adaptia_model') || 'gpt-6-luna', body = {model:modelo, messages:[{role:'system', content:sys + (json ? '\nResponde SOLO con JSON válido.' : '')}, {role:'user', content:user}]};
+  if(json) body.response_format = {type:'json_object'};
+  if(/^(gpt-[56]|o[1-9])/.test(modelo)){ body.max_completion_tokens = max * 2; body.reasoning_effort = 'low'; } else { body.temperature = 0.2; body.max_tokens = max; }
+  for(let k = 0; k < 4; k++){
+    let r; try{ r = await fetch('https://api.openai.com/v1/chat/completions', {method:'POST', headers:{'Content-Type':'application/json', Authorization:'Bearer ' + key}, body:JSON.stringify(body)}); }catch(e){ if(k === 3) throw new Error('No hay conexión con OpenAI.'); await sleep(1500); continue; }
+    if(r.ok){ const t = ((await r.json()).choices?.[0]?.message?.content || '').trim(); if(!json) return t; try{ return JSON.parse(t.replace(/^```(?:json)?|```$/g, '').trim()); }catch(e){ const m = t.match(/\{[\s\S]*\}/); if(m) try{ return JSON.parse(m[0]); }catch(e2){} if(k < 3) continue; throw new Error('Respuesta no válida'); } }
+    const t = await r.text(); if(r.status === 401) throw new Error('OpenAI no reconoce tu clave.'); if(r.status === 429 && /quota|billing/i.test(t)) throw new Error('Tu cuenta de OpenAI no tiene saldo.');
+    if(r.status === 429 || r.status >= 500){ await sleep(2 ** (k + 1) * 1500); continue; } throw new Error('OpenAI ' + r.status + ': ' + t.slice(0, 160));
+  }
+  throw new Error('OpenAI no responde ahora mismo.');
+}
+const hayClave = () => !!localStorage.getItem('ia_openai_key');
+
+/* ══════════ PERFIL DE LA REVISTA (cada regla con su cita verificada) ══════════ */
+const CAMPOS = [['limite_palabras','Límite de palabras del texto principal','num'],['resumen_max','Palabras máximas del resumen','num'],['resumen_estructurado','Resumen estructurado','bool'],['resumen_secciones','Apartados del resumen','list'],['kw_min','Palabras clave mínimas','num'],['kw_max','Palabras clave máximas','num'],['ref_estilo','Estilo de referencias','estilo'],['cita_formato','Citas en el texto','cita'],['ref_max','Referencias máximas','num'],['tablas_max','Tablas máximas','num'],['figuras_max','Figuras máximas','num'],['titulo_max','Caracteres máximos del título','num'],['estructura','Secciones del texto, en orden','list'],['declaraciones','Declaraciones obligatorias','decl'],['highlights','Puntos destacados (highlights): cuántos','num'],['highlights_max','Caracteres máximos por punto destacado','num'],['carta','Carta de presentación','bool']];
+const ESTILOS = {vancouver:'Vancouver', ama:'AMA', apa:'APA 7', harvard:'Harvard'}, CITAS = {corchetes:'Números entre corchetes [1]', parentesis:'Números entre paréntesis (1)', superindice:'Números en superíndice', 'autor-año':'Autor y año (Smith, 2020)'};
+function citaOk(cita, t){ const c = norm(cita).replace(/[«»"“”…'’]/g, ''), m = norm(t).replace(/[«»"“”…'’]/g, ''); if(c.length < 12) return false; if(m.includes(c)) return true; const tr = c.split(/[.;:]\s*/).filter(x => x.length >= 20); return tr.length > 0 && tr.every(x => m.includes(x)); }
+subida('jDrop', 'jFile', async f => { try{ $('jTexto').value = (await leeArchivo(f)).trim(); $('jEstado').textContent = `${f.name} · ${nPal($('jTexto').value).toLocaleString('es')} palabras`; }catch(e){ toast(e.message); } });
+$('jBuscar').onclick = async () => {
+  const n = $('jNombre').value.trim(); if(!n) return;
+  $('jInfo').innerHTML = '<p class="help"><span class="spin"></span> Buscando en OpenAlex…</p>';
+  try{ const d = await (await fetch(`https://api.openalex.org/sources?search=${encodeURIComponent(n)}&filter=type:journal&per_page=3&select=display_name,issn_l,host_organization_name,homepage_url,is_oa,apc_usd`)).json(), s = (d.results || [])[0];
+    if(!s){ $('jInfo').innerHTML = '<p class="help">No la encuentro en OpenAlex; puedes seguir igualmente.</p>'; return; }
+    $('jNombre').value = s.display_name; S.revistaMeta = {issn:s.issn_l, web:s.homepage_url, editorial:s.host_organization_name};
+    $('jInfo').innerHTML = `<div class="tip" style="margin-top:0">${ico('book')}<span><b>${esc(s.display_name)}</b>${s.host_organization_name ? ' · ' + esc(s.host_organization_name) : ''}${s.issn_l ? ' · ISSN ' + esc(s.issn_l) : ''}${s.homepage_url ? ` · <a href="${esc(s.homepage_url)}" target="_blank" rel="noopener">abrir la web de la revista</a> y buscar «Instructions for authors» o «Guide for authors»` : ''}</span></div>`; }
+  catch(e){ $('jInfo').innerHTML = '<p class="help">OpenAlex no responde; puedes seguir igualmente.</p>'; }
+};
+$('jExtraer').onclick = async () => {
+  const t = $('jTexto').value.trim(); if(nPal(t) < 80) return toast('Pega o sube las normas para autores');
+  if(!hayClave()){ $('mAjustes').classList.add('on'); return toast('Extraer el perfil necesita tu clave de OpenAI'); }
+  $('jEstado').innerHTML = '<span class="spin"></span> El analista editorial está leyendo las normas…';
+  try{
+    const r = await ia(`Eres un editor científico. Extraes de las normas para autores de una revista los requisitos del tipo de artículo indicado. Para CADA requisito que encuentres, copia LITERALMENTE en "evidencias" la frase de las normas en que se basa. Si un requisito no aparece, déjalo en null: no lo supongas. Estilos de referencia posibles: vancouver, ama, apa, harvard. Formatos de cita: corchetes, parentesis, superindice, autor-año. Claves de declaraciones: etica, conflicto, financiacion, datos, contribuciones, registro.`,
+      `TIPO DE ARTÍCULO: ${$('jTipo').value}\n\nNORMAS:\n${t.slice(0, 45000)}\n\nDevuelve {"limite_palabras":null,"resumen_max":null,"resumen_estructurado":null,"resumen_secciones":[],"kw_min":null,"kw_max":null,"ref_estilo":null,"cita_formato":null,"ref_max":null,"tablas_max":null,"figuras_max":null,"titulo_max":null,"estructura":[],"declaraciones":[],"highlights":null,"highlights_max":null,"carta":null,"evidencias":{"limite_palabras":"frase literal"}}`, {max:3000});
+    const p = {revista:$('jNombre').value.trim() || 'Revista', tipo:$('jTipo').value.trim(), ...(S.revistaMeta || {}), evid:{}, evok:{}};
+    CAMPOS.forEach(([k,,tp]) => { let v = r[k]; if(tp === 'num') v = v == null || v === '' ? null : +v || null; if(tp === 'list' || tp === 'decl') v = Array.isArray(v) ? v.filter(Boolean) : []; if(tp === 'decl') v = v.filter(x => DECL.includes(x)); if(tp === 'estilo' && !ESTILOS[v]) v = null; if(tp === 'cita' && !CITAS[v]) v = null; if(tp === 'bool') v = v == null ? null : !!v; p[k] = v; const ev = (r.evidencias || {})[k]; if(ev){ p.evid[k] = ev; p.evok[k] = citaOk(ev, t); } });
+    S.perfil = p; S.normas = t; S.cambios = []; guardaPerfil(); pintaPerfil();
+    const sin = CAMPOS.filter(([k]) => hayValor(p[k]) && !p.evok[k]).length; $('jEstado').textContent = `Perfil extraído${sin ? `: ${sin} regla(s) sin cita comprobada, revísalas` : ''}.`;
+  }catch(e){ $('jEstado').textContent = 'No se pudo: ' + e.message; }
+};
+const hayValor = v => v != null && v !== '' && !(Array.isArray(v) && !v.length);
+function pintaPerfil(){
+  const p = S.perfil; if(!p){ $('perfil').innerHTML = '<p class="empty">Aún no hay perfil.</p>'; return; }
+  $('perfil').innerHTML = `<p class="sub" style="margin-top:0"><b>${esc(p.revista)}</b> · ${esc(p.tipo || '')}${p.issn ? ' · ISSN ' + esc(p.issn) : ''}</p><div class="perfil">${CAMPOS.map(([k,t,tp]) => { const v = p[k], b = !hayValor(v) ? '' : p.evok?.[k] ? '<span class="evb ok">con cita</span>' : p.revisado?.[k] ? '<span class="evb ok">confirmado</span>' : '<span class="evb ko">sin cita · confírmalo</span>';
+    const inp = tp === 'num' ? `<input type="number" min="0" data-k="${k}" value="${v ?? ''}" placeholder="sin requisito">` : tp === 'bool' ? `<select data-k="${k}"><option value="" ${v == null ? 'selected' : ''}>sin requisito</option><option value="1" ${v === true ? 'selected' : ''}>sí</option><option value="0" ${v === false ? 'selected' : ''}>no</option></select>` : tp === 'estilo' ? `<select data-k="${k}"><option value="">sin requisito</option>${Object.entries(ESTILOS).map(([e,n]) => `<option value="${e}" ${v === e ? 'selected' : ''}>${n}</option>`).join('')}</select>` : tp === 'cita' ? `<select data-k="${k}"><option value="">sin requisito</option>${Object.entries(CITAS).map(([e,n]) => `<option value="${e}" ${v === e ? 'selected' : ''}>${n}</option>`).join('')}</select>` : tp === 'decl' ? `<input data-k="${k}" value="${esc((v || []).join(', '))}" placeholder="etica, conflicto, financiacion, datos, contribuciones, registro">` : `<input data-k="${k}" value="${esc((v || []).join('; '))}" placeholder="separadas por punto y coma">`;
+    return `<div class="rule"><label>${t} ${b}</label>${inp}${p.evid?.[k] ? `<div class="ev">«${esc(p.evid[k].slice(0, 220))}»</div>` : ''}</div>`; }).join('')}</div>`;
+  $$('#perfil [data-k]').forEach(x => x.onchange = () => { const k = x.dataset.k, tp = CAMPOS.find(c => c[0] === k)[2]; let v = x.value; p[k] = tp === 'num' ? (v === '' ? null : +v) : tp === 'bool' ? (v === '' ? null : v === '1') : tp === 'list' ? v.split(';').map(s => s.trim()).filter(Boolean) : tp === 'decl' ? v.split(/[,;]/).map(s => norm(s)).filter(s => DECL.includes(s)) : (v || null); p.revisado = {...(p.revisado || {}), [k]:true}; S.cambios = []; guardaPerfil(); pintaPerfil(); });
+}
+const perfilesGuardados = () => { try{ return JSON.parse(localStorage.getItem('adaptia_perfiles') || '{}'); }catch(e){ return {}; } };
+function guardaPerfil(){ if(!S.perfil || S._demo) return; const all = perfilesGuardados(); all[norm(S.perfil.revista) + '|' + norm(S.perfil.tipo)] = {...S.perfil, guardado:new Date().toISOString()}; localStorage.setItem('adaptia_perfiles', JSON.stringify(all)); }
+$('btnPerfiles').onclick = () => {
+  const all = Object.entries(perfilesGuardados());
+  $('perfiles').innerHTML = all.length ? all.map(([k,p]) => `<div style="display:flex;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid var(--linea-2)"><div style="flex:1"><b style="font-size:14px">${esc(p.revista)}</b><div class="help" style="margin:0">${esc(p.tipo || '')} · ${new Date(p.guardado).toLocaleDateString('es-ES')}</div></div><button class="btn btn-primary btn-sm" data-us="${esc(k)}">Usar</button><button class="btn btn-ghost btn-sm" data-ex="${esc(k)}">${ico('download')}</button><button class="btn btn-ghost btn-sm" data-bo="${esc(k)}">${ico('trash')}</button></div>`).join('') : '<p class="help">Aún no hay perfiles guardados.</p>';
+  $$('#perfiles [data-us]').forEach(b => b.onclick = () => { S.perfil = perfilesGuardados()[b.dataset.us]; S.cambios = []; $('jNombre').value = S.perfil.revista; $('jTipo').value = S.perfil.tipo || ''; $('mPerfiles').classList.remove('on'); go(2); });
+  $$('#perfiles [data-ex]').forEach(b => b.onclick = () => { const p = perfilesGuardados()[b.dataset.ex]; dl('perfil_' + norm(p.revista).replace(/[^a-z0-9]+/g, '_').slice(0, 40) + '.json', JSON.stringify({adaptia_perfil:1, ...p}, null, 1), 'application/json'); });
+  $$('#perfiles [data-bo]').forEach(b => b.onclick = () => { const all = perfilesGuardados(); delete all[b.dataset.bo]; localStorage.setItem('adaptia_perfiles', JSON.stringify(all)); $('btnPerfiles').click(); });
+  $('mPerfiles').classList.add('on');
+};
+$('pfImport').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if(!f) return; try{ const p = JSON.parse(await f.text()); if(!p.revista || !('limite_palabras' in p)) throw new Error('no es un perfil de AdaptIA'); delete p.adaptia_perfil; S.perfil = p; guardaPerfil(); $('btnPerfiles').click(); toast('Perfil importado'); }catch(err){ toast('No se pudo importar: ' + err.message); } };
+
+/* ══════════ CUMPLIMIENTO (con código) ══════════ */
+const familiaEstilo = e => ['apa','harvard'].includes(e) ? 'autor-año' : 'numerado';
+function gaps(m = medir(), p = S.perfil){
+  const G = [], add = (el, man, rev, est, acc) => G.push({el, man, rev, est, acc});
+  if(p.limite_palabras) add('Palabras del texto principal', m.palabras.toLocaleString('es'), '≤ ' + p.limite_palabras.toLocaleString('es'), m.palabras > p.limite_palabras ? 'aj' : 'ok', m.palabras > p.limite_palabras ? `Reducir unas ${(m.palabras - p.limite_palabras).toLocaleString('es')}` : '');
+  if(p.resumen_max) add('Palabras del resumen', m.resumen, '≤ ' + p.resumen_max, !m.resumen ? 'fa' : m.resumen > p.resumen_max ? 'aj' : 'ok', !m.resumen ? 'Falta el resumen' : m.resumen > p.resumen_max ? 'Reducir' : '');
+  if(p.resumen_estructurado != null) add('Resumen estructurado', m.resumenEstr ? 'sí' : 'no', p.resumen_estructurado ? 'sí' : 'no', m.resumenEstr === p.resumen_estructurado ? 'ok' : 'aj', m.resumenEstr === p.resumen_estructurado ? '' : p.resumen_estructurado ? 'Estructurar' + (p.resumen_secciones?.length ? ': ' + p.resumen_secciones.join(', ') : '') : 'Pasar a un solo párrafo');
+  if(p.kw_min || p.kw_max) add('Palabras clave', m.kw, `${p.kw_min || 1}–${p.kw_max || '…'}`, !m.kw ? 'fa' : (p.kw_min && m.kw < p.kw_min) || (p.kw_max && m.kw > p.kw_max) ? 'aj' : 'ok', !m.kw ? 'Proponer' : (p.kw_max && m.kw > p.kw_max) ? 'Reducir' : (p.kw_min && m.kw < p.kw_min) ? 'Completar' : '');
+  if(p.ref_estilo) add('Estilo de referencias', m.familia, ESTILOS[p.ref_estilo], m.refs ? 'aj' : 'na', m.refs ? `Convertir a ${ESTILOS[p.ref_estilo]} (verificando en Crossref)` : 'Sin referencias');
+  if(p.cita_formato) add('Citas en el texto', m.citas, CITAS[p.cita_formato].split(' (')[0], (familiaEstilo(p.ref_estilo || (p.cita_formato === 'autor-año' ? 'apa' : 'vancouver')) === m.citas) ? 'ok' : 'aj', familiaEstilo(p.ref_estilo || (p.cita_formato === 'autor-año' ? 'apa' : 'vancouver')) === m.citas ? '' : 'Convertir las citas del texto');
+  if(p.ref_max) add('Número de referencias', m.refs, '≤ ' + p.ref_max, m.refs > p.ref_max ? 'aj' : 'ok', m.refs > p.ref_max ? `Quitar ${m.refs - p.ref_max}: decisión tuya` : '');
+  if(p.tablas_max != null) add('Tablas', m.tablas, '≤ ' + p.tablas_max, m.tablas > p.tablas_max ? 'aj' : 'ok', m.tablas > p.tablas_max ? 'Fusionar o pasar a material suplementario: decisión tuya' : '');
+  if(p.figuras_max != null) add('Figuras', m.figuras, '≤ ' + p.figuras_max, m.figuras > p.figuras_max ? 'aj' : 'ok', m.figuras > p.figuras_max ? 'Reducir: decisión tuya' : '');
+  if(p.titulo_max) add('Caracteres del título', m.titulo, '≤ ' + p.titulo_max, m.titulo > p.titulo_max ? 'aj' : 'ok', m.titulo > p.titulo_max ? 'Proponer un título más corto' : '');
+  if(p.estructura?.length) add('Secciones del texto', CUERPO.filter(k => seg(k).length).map(k => SEC[k]).join(', ') || '—', p.estructura.join(', '), 'aj', 'Renombrar y ordenar según la revista');
+  (p.declaraciones || []).forEach(k => add(SEC[k], m.decl[k] ? 'sí' : 'no', 'obligatoria', m.decl[k] ? 'ok' : 'fa', m.decl[k] ? '' : 'Añadir plantilla para completar'));
+  if(p.highlights) add('Puntos destacados', '—', `${p.highlights}${p.highlights_max ? ' (≤ ' + p.highlights_max + ' car.)' : ''}`, 'fa', 'Se proponen en el nivel Paquete');
+  if(p.carta) add('Carta de presentación', '—', 'obligatoria', 'fa', 'Se propone en el nivel Paquete');
+  return G;
+}
+function pintaDiag(){
+  const m = medir(), G = gaps(m);
+  $('gapBody').innerHTML = G.map(g => `<tr><td>${esc(g.el)}</td><td class="n">${esc(g.man)}</td><td class="n">${esc(g.rev)}</td><td><span class="est ${g.est}">${{ok:'cumple', aj:'ajustar', fa:'falta', na:'—'}[g.est]}</span></td><td>${esc(g.acc)}</td></tr>`).join('');
+  const citados = new Set(m.citasNum), sinCitar = m.citas === 'numerado' ? m.refsList.filter(r => !citados.has(r.n)).map(r => r.n) : [], inexist = m.citas === 'numerado' ? [...citados].filter(n => !m.refsList.some(r => r.n === n)) : [];
+  const dup = m.refsList.filter((r,i) => r.doi && m.refsList.findIndex(x => x.doi && x.doi.toLowerCase() === r.doi.toLowerCase()) !== i).map(r => r.n);
+  $('refDiag').innerHTML = `${m.refs} referencias (${m.familia}); citas en el texto: ${m.citas}. ${m.refsList.filter(r => r.doi).length} con DOI.${inexist.length ? `<br><b style="color:var(--brasa)">Citas a referencias que no existen:</b> ${inexist.join(', ')}` : ''}${sinCitar.length ? `<br><b style="color:#8A5A00">Referencias que no se citan:</b> ${sinCitar.join(', ')}` : ''}${dup.length ? `<br><b style="color:#8A5A00">Posibles duplicados (mismo DOI):</b> ${dup.join(', ')}` : ''}<br>La conversión consulta cada referencia en Crossref: las que no se encuentren se dejarán como están, marcadas para revisar.`;
+  $('niveles').innerHTML = [['formato','Nivel 1 · Formato','Cumplir las normas: estructura, resumen, palabras clave, longitud, referencias y declaraciones.'],['edicion','Nivel 2 · Edición','Lo anterior y, además, pulir la redacción científica sin cambiar el contenido.'],['paquete','Nivel 3 · Paquete de envío','Lo anterior y carta de presentación, puntos destacados, declaraciones y plantilla de respuesta a revisores.']].map(([k,t,d]) => `<button type="button" data-n="${k}" aria-pressed="${S.nivel === k}"><span class="k">${t.split(' · ')[0]}</span><b>${t.split(' · ')[1]}</b><small>${d}</small></button>`).join('');
+  $$('#niveles [data-n]').forEach(b => b.onclick = () => { S.nivel = b.dataset.n; S.cambios = []; pintaDiag(); });
+}
+
+/* ══════════ REFERENCIAS: CROSSREF, ESTILOS Y CITAS EN EL TEXTO ══════════ */
+const inic = g => String(g || '').split(/[\s-]+/).filter(Boolean).map(x => x[0].toUpperCase()).join('');
+function fmtRef(c, estilo){
+  const au = (c.author || []).filter(a => a.family), y = c.issued?.['date-parts']?.[0]?.[0] || '', t = (c.title || [''])[0].replace(/\s+/g, ' ').replace(/\.$/, ''), j = (c['short-container-title'] || [])[0] || (c['container-title'] || [''])[0], jl = (c['container-title'] || [''])[0], v = c.volume || '', n = c.issue || '', pg = (c.page || '').replace('--', '-'), doi = c.DOI || '';
+  if(estilo === 'vancouver' || estilo === 'ama'){ const a = au.slice(0, 6).map(x => `${x.family} ${inic(x.given)}`).join(', ') + (au.length > 6 ? ', et al' : ''); return `${a}. ${t}. ${estilo === 'ama' ? jl : j.replace(/\./g, '')}. ${y}${v ? ';' + v : ''}${n ? '(' + n + ')' : ''}${pg ? ':' + pg : ''}.${doi ? (estilo === 'ama' ? ' doi:' : ' doi: ') + doi : ''}`; }
+  const apaA = x => `${x.family}, ${String(x.given || '').split(/[\s-]+/).filter(Boolean).map(g => g[0].toUpperCase() + '.').join(' ')}`;
+  if(estilo === 'apa'){ const a = au.length > 20 ? au.slice(0, 19).map(apaA).join(', ') + ', ... ' + apaA(au[au.length - 1]) : au.length > 1 ? au.slice(0, -1).map(apaA).join(', ') + ', & ' + apaA(au[au.length - 1]) : au.map(apaA).join(''); return `${a} (${y}). ${t}. ${jl}${v ? ', ' + v : ''}${n ? '(' + n + ')' : ''}${pg ? ', ' + pg : ''}.${doi ? ' https://doi.org/' + doi : ''}`; }
+  const hA = x => `${x.family}, ${inic(x.given).split('').join('.')}.`; const a = au.length > 3 ? hA(au[0]) + ' et al.' : au.length > 1 ? au.slice(0, -1).map(hA).join(', ') + ' and ' + hA(au[au.length - 1]) : au.map(hA).join('');
+  return `${a} (${y}) '${t}', ${jl}${v ? ', ' + v : ''}${n ? '(' + n + ')' : ''}${pg ? ', pp. ' + pg : ''}.${doi ? ' doi:' + doi : ''}`;
+}
+const simil = (a, b) => { const A = new Set(norm(a).split(/\W+/).filter(w => w.length > 3)), B = new Set(norm(b).split(/\W+/).filter(w => w.length > 3)); if(!A.size) return 0; let k = 0; A.forEach(w => { if(B.has(w)) k++; }); return k / A.size; };
+async function crossref(r){
+  const m = localStorage.getItem('adaptia_correo'), mail = m ? `mailto=${encodeURIComponent(m)}&` : '';
+  try{
+    if(r.doi){ const d = await (await fetch(`https://api.crossref.org/works/${encodeURIComponent(r.doi)}?${mail}`)).json(); if(d.message) return {c:d.message, via:'DOI'}; }
+    const d = await (await fetch(`https://api.crossref.org/works?${mail}rows=2&query.bibliographic=${encodeURIComponent(r.raw.slice(0, 300))}`)).json();
+    const it = (d.message?.items || []).find(x => simil((x.title || [''])[0], r.raw) >= .7 && (!r.anio || String(x.issued?.['date-parts']?.[0]?.[0]) === r.anio));
+    return it ? {c:it, via:'búsqueda'} : null;
+  }catch(e){ return null; }
+}
+const claveAY = (ap, an) => norm(ap).split(' ')[0] + '|' + String(an).slice(0, 4);
+async function prepararRefs(estilo, formato, aviso){
+  const m = medir(), refs = m.refsList, out = [];
+  for(const [i,r] of refs.entries()){ aviso(`Referencia ${i + 1} de ${refs.length} en Crossref…`); const x = await crossref(r); out.push({...r, meta:x?.c || null, via:x?.via || ''}); await sleep(80); }
+  return ordenaRefs(out, estilo, formato, m);
+}
+function ordenaRefs(out, estilo, formato, m = medir()){
+  out.forEach(r => { r.nueva = r.meta ? fmtRef(r.meta, estilo) : r.raw; r.ap = r.meta?.author?.[0]?.family || r.apellido; r.an = String(r.meta?.issued?.['date-parts']?.[0]?.[0] || r.anio); });
+  const destinoNum = familiaEstilo(estilo) === 'numerado', origen = m.citas, orden = [], mapa = {};
+  const cuerpoTxt = CUERPO.map(k => txt(k)).join('\n');
+  if(origen === 'numerado'){ for(const mm of cuerpoTxt.matchAll(RX_NUM)) expandeNum(mm[1]).forEach(n => { if(!(n in mapa) && out.some(r => r.n === n)){ mapa[n] = orden.length + 1; orden.push(n); } }); }
+  else if(origen === 'autor-año'){ const ix = Object.fromEntries(out.map(r => [claveAY(r.ap, r.an), r.n])); const vis = k => { const n = ix[k]; if(n && !(n in mapa)){ mapa[n] = orden.length + 1; orden.push(n); } }; for(const mm of cuerpoTxt.matchAll(/\(([^()]*?(?:19|20)\d{2}[a-z]?[^()]*?)\)|\b([A-ZÁÉÍÓÚ][a-záéíóúñ'’\-]+)(?: et al\.?| (?:and|y|&) [A-ZÁÉÍÓÚ][a-záéíóúñ'’\-]+)? \(((?:19|20)\d{2})[a-z]?\)/g)){ if(mm[1]) mm[1].split(';').forEach(p => { const a = p.match(/([A-ZÁÉÍÓÚ][a-záéíóúñ'’\-]+)[^;]*?((?:19|20)\d{2})/); if(a) vis(claveAY(a[1], a[2])); }); else vis(claveAY(mm[2], mm[3])); } }
+  let lista;
+  if(destinoNum){ const citadas = orden.map(n => out.find(r => r.n === n)), resto = out.filter(r => !orden.includes(r.n)); lista = [...citadas, ...resto]; }
+  else lista = [...out].sort((a,b) => norm(a.ap).localeCompare(norm(b.ap)) || String(a.an).localeCompare(String(b.an)));
+  lista.forEach((r,i) => r.nn = i + 1);
+  return {estilo, formato, destinoNum, origen, lista, mapa, noVerif:out.filter(r => !r.meta).length, sinCitar:out.filter(r => !orden.includes(r.n)).map(r => r.n)};
+}
+function convierteCitas(t, R){
+  const porN = Object.fromEntries(R.lista.map(r => [r.n, r])), fmtNum = ns => { const s = [...new Set(ns)].sort((a,b) => a - b), g = []; for(let i = 0; i < s.length; i++){ let j = i; while(j + 1 < s.length && s[j + 1] === s[j] + 1) j++; g.push(j - i >= 2 ? `${s[i]}–${s[j]}` : j > i ? `${s[i]},${s[j]}` : `${s[i]}`); i = j; } const c = g.join(','); return R.formato === 'parentesis' ? `(${c})` : R.formato === 'superindice' ? `^${c}^` : `[${c}]`; };
+  const ay = r => { const a = r.meta?.author || []; const nom = a.length > 2 ? `${r.ap} et al.` : a.length === 2 ? `${a[0].family} & ${a[1].family}` : r.ap; return `${nom}, ${r.an}`; };
+  let noCasa = 0;
+  if(R.origen === 'numerado'){
+    t = t.replace(RX_NUM, (x, g) => { const rs = expandeNum(g).map(n => porN[n]).filter(Boolean); if(!rs.length){ noCasa++; return x; } return R.destinoNum ? fmtNum(rs.map(r => r.nn)) : '(' + rs.map(ay).join('; ') + ')'; });
+  } else if(R.origen === 'autor-año'){
+    const ix = Object.fromEntries(R.lista.map(r => [claveAY(r.ap, r.an), r]));
+    t = t.replace(RX_AY, (x, g) => { const rs = g.split(';').map(p => { const a = p.match(/([A-ZÁÉÍÓÚ][a-záéíóúñ'’\-]+)[^;]*?((?:19|20)\d{2})/); return a && ix[claveAY(a[1], a[2])]; }); if(rs.some(r => !r)){ noCasa++; return x; } return R.destinoNum ? fmtNum(rs.map(r => r.nn)) : '(' + rs.map(ay).join('; ') + ')'; });
+    if(R.destinoNum) t = t.replace(RX_AYN, (x, ap, an) => { const r = ix[claveAY(ap, an)]; if(!r){ noCasa++; return x; } return x.replace(/\s*\((?:19|20)\d{2}[a-z]?\)$/, '') + ' ' + fmtNum([r.nn]); });
+  }
+  return {t, noCasa};
+}
+</script>
+<script>
+/* ══════════ AUDITOR: lo científico se vigila con código ══════════ */
+const FUERTE = /\b(prove[sd]?|proof|demonstrat(e|es|ed)|confirm(s|ed)?|establish(es|ed)|cause[sd]?|caused by|leads? to|led to|results? in|resulted in|definitively|clearly show(s|ed)?|significantly improve[sd]?|demuestra[n]?|prueba[n]?|confirma[n]?|causa[n]?|establece[n]?|provoca[n]?|sin duda)\b/gi;
+const PRUDENTE = /\b(may|might|could|possibly|potentially|suggests?|suggested|associated|association|appears?|likely|seems?|indicates?|podr[ií]a[n]?|puede[n]?|sugiere[n]?|asociad[oa]s?|asociaci[oó]n|parece[n]?|posiblemente|probablemente)\b/gi;
+const cuenta = (rx, t) => (String(t).match(rx) || []).length;
+/* verbos de efecto en presente: cuentan como afirmación fuerte solo si no llevan delante un matiz (may reduce ≠ reduces) */
+const EFECTO = /\b(reduces|improves|decreases|increases|prevents|eliminates|shortens|lowers|enhances|reduce|mejora|disminuye|aumenta|previene|evita|acorta)\b/gi;
+function fuerza(t){ t = String(t); let n = cuenta(FUERTE, t); for(const m of t.matchAll(EFECTO)){ const antes = t.slice(Math.max(0, m.index - 28), m.index); if(!/\b(may|might|could|can|would|to|podr[ií]a|puede|pueden|para|que)\b\s*(\w+\s+)?$/i.test(antes)) n++; } return n; }
+function cifras(t){ const s = String(t || '').replace(RX_NUM, ' ').replace(/\^[\d,–\-]+\^/g, ' ').replace(/\b(19|20)\d{2}[a-z]?\b(?=[^()]*\))/g, ' '); return new Set((s.match(/(?<![\w.])[−-]?\d+(?:[.,]\d+)*%?/g) || []).map(n => { n = n.replace('−', '-'); if(/^\d{1,3}(,\d{3})+$/.test(n)) n = n.replace(/,/g, ''); return n.replace(',', '.').replace(/^(-?)0+(\d)/, '$1$2'); })); }
+/* cita a cita (número o apellido+año), no por paréntesis: juntar dos citas en uno no es añadir ninguna */
+function citasDe(t){ const s = new Set(); t = String(t); for(const m of t.matchAll(RX_NUM)) expandeNum(m[1]).forEach(n => s.add('[' + n + ']')); for(const m of t.matchAll(RX_AY)) m[1].split(';').forEach(p => { const a = p.match(/([A-ZÁÉÍÓÚ][a-záéíóúñ'’\-]+)[^;]*?((?:19|20)\d{2}[a-z]?)/); if(a) s.add(`(${a[1]}, ${a[2]})`); }); for(const m of t.matchAll(RX_AYN)) s.add(`(${m[1]}, ${m[2]})`); return s; }
+function auditar(orig, nuevo, contexto, {cuentaCitas = true} = {}){
+  const A = [], ctx = cifras(contexto), co = cifras(orig), cn = cifras(nuevo);
+  const nuevas = [...cn].filter(x => !ctx.has(x)); if(nuevas.length) A.push({g:'roj', t:`Aparecen cifras que no están en tu manuscrito: ${nuevas.join(', ')}.`});
+  const quitadas = [...co].filter(x => !cn.has(x)); if(quitadas.length) A.push({g:'amb', t:`Desaparecen cifras del original: ${quitadas.slice(0, 12).join(', ')}${quitadas.length > 12 ? '…' : ''}. Comprueba que no se pierde un resultado.`});
+  const f0 = fuerza(orig), f1 = fuerza(nuevo), p0 = cuenta(PRUDENTE, orig), p1 = cuenta(PRUDENTE, nuevo);
+  if(f1 > f0) A.push({g:'roj', t:`La redacción es más categórica: expresiones de certeza o causalidad pasan de ${f0} a ${f1}.`});
+  if(p1 < p0) A.push({g:'amb', t:`Se pierden matices de prudencia (may, suggests, associated…): de ${p0} a ${p1}. Comprueba que no se refuerza ninguna afirmación.`});
+  if(cuentaCitas){ const c0 = citasDe(orig), c1 = citasDe(nuevo), fu = [...c0].filter(x => !c1.has(x)), ap = [...c1].filter(x => !c0.has(x)); if(fu.length) A.push({g:'amb', t:`Se quitan citas: ${fu.slice(0, 8).join(' ')}.`}); if(ap.length) A.push({g:'roj', t:`Se añaden citas que no estaban: ${ap.slice(0, 8).join(' ')}.`}); }
+  return A;
+}
+async function auditarIA(orig, nuevo){
+  if(!hayClave()) return [];
+  try{ const r = await ia(`Eres el auditor final de un asistente editorial. Comparas un ORIGINAL y una PROPUESTA de reescritura. Señala SOLO cambios de contenido científico: resultados, cifras, población, métodos, conclusiones, dirección o fuerza de una afirmación, causalidad, limitaciones omitidas. No señales cambios de estilo, orden o longitud que no alteren el significado.`, `ORIGINAL:\n${orig.slice(0, 9000)}\n\nPROPUESTA:\n${nuevo.slice(0, 9000)}\n\nDevuelve {"cambios":[{"descripcion":"","gravedad":"alta|media"}]}`, {max:1200}); return (r.cambios || []).filter(c => c.descripcion).map(c => ({g:c.gravedad === 'alta' ? 'roj' : 'amb', t:'Auditor: ' + c.descripcion})); }
+  catch(e){ return [{g:'amb', t:'El auditor semántico no ha podido revisar este cambio: ' + e.message}]; }
+}
+const nivelDe = A => A.some(a => a.g === 'roj') ? 'roj' : A.some(a => a.g === 'amb') ? 'amb' : 'ver';
+
+/* ══════════ AGENTES DE ADAPTACIÓN ══════════ */
+const NO_INVENTAR = `REGLAS OBLIGATORIAS (integridad científica):
+- Cambia solo la forma: estructura, longitud, estilo, terminología y formato.
+- NO añadas ni cambies cifras, tamaños de muestra, valores p, intervalos, métodos, resultados ni conclusiones.
+- NO hagas más fuertes las afirmaciones: conserva los matices (may, suggests, associated with…) y no conviertas asociaciones en causas.
+- NO añadas citas ni referencias; conserva las que haya tal cual, en el mismo sitio lógico.
+- Si para cumplir una norma faltara información, no la inventes: escribe [COMPLETAR: qué falta].`;
+function log(t, c = ''){ $('adLog').insertAdjacentHTML('beforeend', `<div>${c === 'ok' ? '✓' : c === 'ko' ? '⚠' : '·'} ${esc(t)}</div>`); }
+const idiomaMs = () => { const t = norm(S.segs.map(s => s.text).join(' ').slice(0, 4000)); return (t.match(/\b(the|and|of|with|were)\b/g) || []).length > (t.match(/\b(el|la|los|las|y|con|fueron)\b/g) || []).length ? 'en' : 'es'; };
+const PLANT = {
+  en:{etica:'This study was approved by [COMPLETAR: ethics committee and approval number]. [COMPLETAR: informed consent was obtained from all participants / the requirement for informed consent was waived because …].', conflicto:'The authors declare that they have no competing interests. [COMPLETAR: confirm or declare any interests]', financiacion:'[COMPLETAR: This research received no specific grant from any funding agency / This work was supported by … (grant number …)]', datos:'[COMPLETAR: The data that support the findings of this study are available from the corresponding author upon reasonable request / in repository … (DOI …)]', contribuciones:'[COMPLETAR: e.g., AB: conceptualization, methodology, writing – original draft; CD: formal analysis, writing – review and editing. All authors read and approved the final manuscript.]', registro:'[COMPLETAR: trial registry and registration number, date of registration]'},
+  es:{etica:'Este estudio fue aprobado por [COMPLETAR: comité de ética y número de aprobación]. [COMPLETAR: se obtuvo el consentimiento informado de todos los participantes / se eximió del consentimiento porque …].', conflicto:'Los autores declaran no tener conflictos de intereses. [COMPLETAR: confirmar o declarar intereses]', financiacion:'[COMPLETAR: Esta investigación no recibió financiación específica / Este trabajo fue financiado por … (referencia …)]', datos:'[COMPLETAR: Los datos que respaldan los resultados están disponibles previa solicitud razonable al autor de correspondencia / en el repositorio … (DOI …)]', contribuciones:'[COMPLETAR: p. ej., AB: conceptualización, metodología, redacción del borrador; CD: análisis formal, revisión y edición. Todos los autores aprobaron la versión final.]', registro:'[COMPLETAR: registro del ensayo y número de registro, fecha]'}};
+const TITULOS_DECL = {en:{etica:'Ethics approval', conflicto:'Competing interests', financiacion:'Funding', datos:'Data availability', contribuciones:'Author contributions', registro:'Trial registration'}, es:{etica:'Aprobación ética', conflicto:'Conflicto de intereses', financiacion:'Financiación', datos:'Disponibilidad de datos', contribuciones:'Contribuciones de los autores', registro:'Registro del ensayo'}};
+function mapaEstructura(p){ const orden = [], nombres = {}; (p.estructura || []).forEach(n => { const k = claveDe(n) || (/(intro|background)/i.test(n) ? 'introduccion' : null); if(k && !orden.includes(k)){ orden.push(k); nombres[k] = n; } }); return {orden, nombres}; }
+async function adaptar(){
+  const p = S.perfil, m = medir(), lang = idiomaMs(), todo = S.segs.map(s => s.text).join('\n\n'), nuevo = [], bar = v => $('adBar').style.width = v + '%';
+  const add = async (c, audit = true) => { c.id = uid('c'); c.estado = 'pendiente'; if(audit && c.original != null){ c.alertas = [...(c.alertas || []), ...auditar(c.original, c.propuesto, todo, c.opts), ...(c.semantica === false ? [] : await auditarIA(c.original, c.propuesto))]; } c.alertas = c.alertas || []; c.nivel = c.nivelFijo || nivelDe(c.alertas); nuevo.push(c); };
+  $('adLog').innerHTML = ''; const IA = hayClave(); if(!IA) log('Sin clave: solo se prepararán la estructura, las referencias y las declaraciones. Los cambios de redacción necesitan una clave.', 'ko');
+  const G = gaps(m, p), falla = t => G.some(g => g.el === t && (g.est === 'aj' || g.est === 'fa'));
+  /* estructura */
+  if(p.estructura?.length){ const {orden, nombres} = mapaEstructura(p); const antes = S.segs.filter(s => CUERPO.includes(s.clave)).map(s => s.heading), despues = orden.filter(k => seg(k).length).map(k => nombres[k]); if(despues.length) await add({tipo:'Estructura', titulo:'Títulos y orden de las secciones', clave:'_estructura', original:antes.join('\n'), propuesto:despues.join('\n') + (CUERPO.filter(k => seg(k).length && !orden.includes(k)).length ? '\n(se mantienen al final: ' + CUERPO.filter(k => seg(k).length && !orden.includes(k)).map(k => SEC[k]).join(', ') + ')' : ''), data:{orden, nombres}, nivelFijo:'ver', semantica:false}, false); log('Estructura según la revista', 'ok'); }
+  bar(10);
+  /* resumen */
+  if(IA && (falla('Palabras del resumen') || falla('Resumen estructurado'))){ log('Redactor: adaptando el resumen…'); const o = txt('resumen'); const r = await ia(`Eres el redactor de un asistente editorial científico. Adaptas el RESUMEN a las normas de la revista. ${NO_INVENTAR}\nTodas las cifras deben salir del resumen o del texto del manuscrito.`, `NORMAS: ${p.resumen_estructurado ? 'estructurado con los apartados ' + (p.resumen_secciones?.length ? p.resumen_secciones.join(', ') : 'Background, Methods, Results, Conclusions') + ' (cada apartado en su línea, empezando por su nombre y dos puntos)' : 'un solo párrafo, sin apartados'}${p.resumen_max ? `; máximo ${p.resumen_max} palabras en total` : ''}.\n\nRESUMEN ORIGINAL:\n${o || '(no hay resumen: redáctalo a partir del manuscrito)'}\n\nMANUSCRITO (para situar cifras y conclusiones):\n${todo.slice(0, 14000)}\n\nDevuelve {"resumen":"..."}`, {max:1500}); await add({tipo:'Resumen', titulo:`Resumen${p.resumen_max ? ' (≤ ' + p.resumen_max + ' palabras)' : ''}`, clave:'resumen', original:o, propuesto:(r.resumen || '').trim()}); const c = nuevo[nuevo.length - 1]; if(p.resumen_max && nPal(c.propuesto) > p.resumen_max) c.alertas.push({g:'amb', t:`La propuesta tiene ${nPal(c.propuesto)} palabras y el máximo es ${p.resumen_max}: recórtala al editar.`}); c.nivel = nivelDe(c.alertas); log('Resumen propuesto', 'ok'); }
+  bar(25);
+  /* palabras clave */
+  if(IA && falla('Palabras clave')){ const o = txt('palabras_clave'); const r = await ia(`Propones palabras clave para un artículo, tomadas de su contenido (preferiblemente términos MeSH si es biomédico). No añadas conceptos que el artículo no trate.`, `ENTRE ${p.kw_min || 3} Y ${p.kw_max || 6} PALABRAS CLAVE.\nACTUALES: ${o || '(ninguna)'}\nTÍTULO Y RESUMEN:\n${txt('titulo')}\n${txt('resumen').slice(0, 3000)}\n\nDevuelve {"palabras_clave":["..."]}`, {max:500}); const kw = (r.palabras_clave || []).slice(0, p.kw_max || 8); const aus = kw.filter(k => !norm(todo).includes(norm(k).split(' ')[0])); await add({tipo:'Palabras clave', titulo:`Palabras clave (${p.kw_min || 1}–${p.kw_max || '…'})`, clave:'palabras_clave', original:o, propuesto:kw.join('; '), alertas:aus.length ? [{g:'amb', t:`Términos que no aparecen literalmente en el manuscrito: ${aus.join(', ')}.`}] : [], semantica:false, opts:{cuentaCitas:false}}); log('Palabras clave propuestas', 'ok'); }
+  /* título */
+  if(IA && falla('Caracteres del título')){ const o = txt('titulo').split('\n')[0]; const r = await ia(`Acortas el título de un artículo científico. ${NO_INVENTAR}`, `MÁXIMO ${p.titulo_max} caracteres.\nTÍTULO: ${o}\n\nDevuelve {"titulo":""}`, {max:300}); await add({tipo:'Título', titulo:`Título (≤ ${p.titulo_max} caracteres)`, clave:'titulo', original:o, propuesto:(r.titulo || '').trim()}); log('Título propuesto', 'ok'); }
+  bar(35);
+  /* longitud y redacción del texto principal */
+  const exceso = p.limite_palabras && m.palabras > p.limite_palabras ? m.palabras - p.limite_palabras : 0, pulir = S.nivel !== 'formato' && $('optIngles').checked;
+  if(IA && (exceso || pulir)){
+    const w = Object.fromEntries(CUERPO.map(k => [k, nPal(txt(k))])), prim = ['introduccion','discusion','conclusiones'].filter(k => w[k]), baseP = prim.reduce((s,k) => s + w[k], 0), obj = {};
+    let resto = exceso; prim.forEach(k => { const q = Math.min(Math.round(w[k] * .4), Math.round(exceso * w[k] / Math.max(1, baseP))); obj[k] = w[k] - q; resto -= q; });
+    if(resto > 0) ['metodos','resultados'].filter(k => w[k]).forEach(k => { const q = Math.min(Math.round(w[k] * .15), resto); obj[k] = w[k] - q; resto -= q; });
+    const secs = CUERPO.filter(k => w[k] && (obj[k] != null && obj[k] < w[k] || pulir));
+    for(const [i,k] of secs.entries()){
+      log(`Redactor: ${obj[k] < w[k] ? `reduciendo ${SEC[k].toLowerCase()} de ${w[k]} a unas ${obj[k]} palabras` : 'puliendo ' + SEC[k].toLowerCase()}${obj[k] < w[k] && pulir ? ' y puliendo' : ''}…`);
+      const o = txt(k); const r = await ia(`Eres el redactor de un asistente editorial científico. ${NO_INVENTAR}${['metodos','resultados'].includes(k) ? '\nEsta sección es MÉTODOS o RESULTADOS: condensa la redacción sin eliminar ningún dato, procedimiento ni resultado.' : ''}`, `TAREA: ${obj[k] < w[k] ? `reducir la sección a unas ${obj[k]} palabras (ahora ${w[k]}) eliminando redundancias y detalles no esenciales, sin perder ninguna idea científica relevante` : 'mantener la longitud'}${pulir ? '; además, pulir la redacción científica en inglés académico claro y preciso' : ''}.\nSECCIÓN (${SEC[k]}):\n${o}\n\nDevuelve {"texto":"..."} con la sección reescrita, en párrafos.`, {max:4000});
+      await add({tipo:obj[k] < w[k] ? 'Longitud' : 'Redacción', titulo:`${SEC[k]}${obj[k] < w[k] ? `: de ${w[k]} a ${nPal(r.texto)} palabras` : ''}`, clave:k, original:o, propuesto:(r.texto || '').trim()});
+      bar(35 + 30 * (i + 1) / secs.length);
+    }
+    if(resto > 0) log(`Aun así faltarían unas ${resto} palabras: sin tocar métodos y resultados más a fondo no se puede. Queda pendiente para ti.`, 'ko');
+  }
+  bar(65);
+  /* referencias */
+  if(p.ref_estilo && m.refs){ log('Editor de referencias: consultando Crossref…'); const R = await prepararRefs(p.ref_estilo, p.cita_formato || (familiaEstilo(p.ref_estilo) === 'numerado' ? 'corchetes' : 'autor-año'), t => { $('adLog').lastElementChild.textContent = '· ' + t; });
+    const lista = R.lista.map(r => (R.destinoNum ? r.nn + '. ' : '') + r.nueva).join('\n'), prueba = convierteCitas(CUERPO.map(k => txt(k)).join('\n'), R), A = [];
+    if(R.noVerif) A.push({g:'amb', t:`${R.noVerif} referencia(s) no encontradas en Crossref: se dejan como estaban. Dales formato a mano.`});
+    if(R.sinCitar.length && R.origen !== 'ninguno') A.push({g:'amb', t:`Referencias que no se citan en el texto (van al final): ${R.sinCitar.join(', ')}.`});
+    if(prueba.noCasa) A.push({g:'amb', t:`${prueba.noCasa} cita(s) del texto no se han podido emparejar con una referencia: se dejan como estaban.`});
+    await add({tipo:'Referencias', titulo:`Referencias a ${ESTILOS[p.ref_estilo]}${R.origen !== (R.destinoNum ? 'numerado' : 'autor-año') ? ' y citas del texto convertidas' : R.destinoNum ? ' y citas renumeradas por orden de aparición' : ''}`, clave:'referencias', original:txt('referencias'), propuesto:lista, alertas:A, data:R, semantica:false}, false);
+    log(`${R.lista.length - R.noVerif} de ${R.lista.length} referencias verificadas en Crossref`, R.noVerif ? 'ko' : 'ok'); }
+  bar(80);
+  /* declaraciones */
+  const falt = (p.declaraciones || []).filter(k => !m.decl[k]);
+  for(const k of falt) await add({tipo:'Declaración', titulo:TITULOS_DECL[lang][k] + ' (plantilla para completar)', clave:k, original:'', propuesto:PLANT[lang][k], alertas:[{g:'amb', t:'Plantilla: completa los datos entre corchetes antes de enviar. La app no los inventa.'}], semantica:false}, false);
+  if(falt.length) log(`${falt.length} declaración(es) obligatoria(s) añadidas como plantilla`, 'ok');
+  /* paquete de envío */
+  if(S.nivel === 'paquete' && IA){
+    log('Paquete: carta de presentación y puntos destacados…');
+    const r = await ia(`Preparas documentos de envío a una revista a partir SOLO del manuscrito. ${NO_INVENTAR}\nLa carta: una página, sobria, dirigida al editor; qué se envía, pregunta y hallazgo principal (con las cifras del manuscrito), por qué encaja en la revista, y las declaraciones habituales (original, no enviado a otra revista, aprobado por todos los autores); con [COMPLETAR] donde falte algo.`, `REVISTA: ${p.revista} (${p.tipo || ''})\nPUNTOS DESTACADOS: ${p.highlights || 3}${p.highlights_max ? ', máximo ' + p.highlights_max + ' caracteres cada uno' : ''}\nMANUSCRITO:\n${todo.slice(0, 16000)}\n\nDevuelve {"carta":"","highlights":["..."]}`, {max:2500});
+    await add({tipo:'Paquete', titulo:'Carta de presentación', clave:'_carta', original:'', propuesto:(r.carta || '').trim(), alertas:auditar('', r.carta || '', todo, {cuentaCitas:false}).filter(a => a.g === 'roj'), semantica:false}, false);
+    const hl = (r.highlights || []).slice(0, p.highlights || 5), largos = p.highlights_max ? hl.filter(h => h.length > p.highlights_max) : [];
+    await add({tipo:'Paquete', titulo:`Puntos destacados (${hl.length})`, clave:'_highlights', original:'', propuesto:hl.join('\n'), alertas:[...auditar('', hl.join('\n'), todo, {cuentaCitas:false}).filter(a => a.g === 'roj'), ...largos.map(h => ({g:'amb', t:`Supera ${p.highlights_max} caracteres (${h.length}): «${h.slice(0, 50)}…»`})), ...(fuerza(hl.join(' ')) > 0 && fuerza(hl.join(' ')) > fuerza(todo) ? [{g:'roj', t:'Los puntos destacados usan expresiones más categóricas que el manuscrito.'}] : [])], semantica:false}, false);
+    log('Carta y puntos destacados listos', 'ok');
+  }
+  bar(100);
+  return nuevo;
+}
+
+/* ══════════ REVISIÓN CON DIFF ══════════ */
+function diffHtml(a, b){
+  const A = String(a).split(/(\s+)/), B = String(b).split(/(\s+)/);
+  if(A.length * B.length > 3e6) return `<del>${esc(a)}</del>\n\n<ins>${esc(b)}</ins>`;
+  const n = A.length, m = B.length, L = Array.from({length:n + 1}, () => new Uint16Array(m + 1));
+  for(let i = n - 1; i >= 0; i--) for(let j = m - 1; j >= 0; j--) L[i][j] = A[i] === B[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  let i = 0, j = 0, o = ''; while(i < n && j < m){ if(A[i] === B[j]){ o += esc(A[i]); i++; j++; } else if(L[i + 1][j] >= L[i][j + 1]){ o += `<del>${esc(A[i])}</del>`; i++; } else { o += `<ins>${esc(B[j])}</ins>`; j++; } }
+  while(i < n) o += `<del>${esc(A[i++])}</del>`; while(j < m) o += `<ins>${esc(B[j++])}</ins>`; return o.replace(/<\/del><del>/g, '').replace(/<\/ins><ins>/g, '');
+}
+function pintaCambios(){
+  const C = S.cambios, cnt = e => C.filter(c => c.estado === e).length;
+  $('revCuenta').textContent = `${C.length} cambios · ${cnt('aceptado') + cnt('editado')} aceptados · ${cnt('rechazado')} rechazados · ${cnt('pendiente')} pendientes`;
+  $('cambios').innerHTML = C.length ? C.map((c,i) => `<div class="cambio ${c.nivel === 'roj' ? 'roj' : c.nivel === 'amb' ? 'amb' : ''} ${c.estado === 'aceptado' || c.estado === 'editado' ? 'acep' : c.estado === 'rechazado' ? 'rech' : ''}"><header><span class="tipo">${esc(c.tipo)}</span><b>${esc(c.titulo)}</b><span class="est ${c.estado === 'rechazado' ? 'na' : c.estado === 'pendiente' ? 'fa' : 'ok'}">${{pendiente:'pendiente', aceptado:'aceptado', editado:'editado por ti', rechazado:'rechazado'}[c.estado]}</span></header>${c.alertas.length ? `<div class="alertas">${c.alertas.map(a => `<div class="alerta ${a.g}">${a.g === 'roj' ? '⛔' : '⚠'} ${esc(a.t)}</div>`).join('')}</div>` : ''}${c._ed ? `<textarea data-ta="${i}">${esc(c.propuesto)}</textarea>` : `<div class="diff">${c.original ? diffHtml(c.original, c.propuesto) : `<ins>${esc(c.propuesto)}</ins>`}</div>`}<div class="acts">${c._ed ? `<button class="btn btn-primary btn-sm" type="button" data-gu="${i}">Guardar</button><button class="btn btn-ghost btn-sm" type="button" data-ca="${i}">Cancelar</button>` : `<button class="btn btn-primary btn-sm" type="button" data-ac="${i}">${ico('check')}Aceptar</button><button class="btn btn-ghost btn-sm" type="button" data-re="${i}">Rechazar</button>${c.clave === 'referencias' || c.clave === '_estructura' ? '' : `<button class="btn btn-ghost btn-sm" type="button" data-ed="${i}">${ico('pencil')}Editar</button>`}`}${c.original && !c._ed ? `<span class="help" style="margin:0 0 0 auto">${nPal(c.original)} → ${nPal(c.propuesto)} palabras</span>` : ''}</div></div>`).join('') : '<p class="empty">No hay cambios que proponer: tu manuscrito ya cumple lo que se puede adaptar automáticamente.</p>';
+  $$('#cambios [data-ac]').forEach(b => b.onclick = () => { const c = C[+b.dataset.ac]; if(c.nivel === 'roj' && !confirm('El auditor ha detectado un posible cambio científico en esta propuesta. ¿Aceptarla igualmente? Asumes que has comprobado que el contenido no cambia.')) return; c.estado = 'aceptado'; pintaCambios(); });
+  $$('#cambios [data-re]').forEach(b => b.onclick = () => { C[+b.dataset.re].estado = 'rechazado'; pintaCambios(); });
+  $$('#cambios [data-ed]').forEach(b => b.onclick = () => { C[+b.dataset.ed]._ed = true; pintaCambios(); });
+  $$('#cambios [data-ca]').forEach(b => b.onclick = () => { C[+b.dataset.ca]._ed = false; pintaCambios(); });
+  $$('#cambios [data-gu]').forEach(b => b.onclick = () => { const c = C[+b.dataset.gu], v = $$(`#cambios [data-ta="${b.dataset.gu}"]`)[0].value; c.propuesto = v; c._ed = false; c.estado = 'editado'; if(c.original){ c.alertas = auditar(c.original, v, S.segs.map(s => s.text).join('\n\n')); c.nivel = nivelDe(c.alertas); } pintaCambios(); });
+  updateNav();
+}
+$('aceptarVerdes').onclick = () => { S.cambios.forEach(c => { if(c.nivel === 'ver' && c.estado === 'pendiente') c.estado = 'aceptado'; }); pintaCambios(); };
+
+/* ══════════ APLICAR SOLO LO ACEPTADO ══════════ */
+function construyeFinal(){
+  const ok = S.cambios.filter(c => c.estado === 'aceptado' || c.estado === 'editado'), lang = idiomaMs();
+  let segs = S.segs.map(s => ({...s}));
+  const pon = (k, t, h) => { const i = segs.findIndex(s => s.clave === k); if(i >= 0){ segs[i].text = t; if(h) segs[i].heading = h; segs = segs.filter((s,j) => s.clave !== k || j === i); } else segs.push({id:uid('s'), clave:k, heading:h || SEC[k], text:t}); };
+  const est = ok.find(c => c.clave === '_estructura'), ref = ok.find(c => c.clave === 'referencias');
+  ok.filter(c => !c.clave.startsWith('_') && c.clave !== 'referencias').forEach(c => pon(c.clave, c.propuesto, DECL.includes(c.clave) ? TITULOS_DECL[lang][c.clave] : c.clave === 'palabras_clave' ? (lang === 'en' ? 'Keywords' : 'Palabras clave') : c.clave === 'resumen' ? (lang === 'en' ? 'Abstract' : 'Resumen') : null));
+  if(ref){ const R = ref.data; segs.forEach(s => { if(CUERPO.includes(s.clave) || s.clave === 'resumen' || s.clave === 'otra') s.text = convierteCitas(s.text, R).t; }); pon('referencias', ref.propuesto, lang === 'en' ? 'References' : 'Referencias'); }
+  if(est){ segs.forEach(s => { if(est.data.nombres[s.clave]) s.heading = est.data.nombres[s.clave]; }); }
+  const ordenCuerpo = est ? [...est.data.orden, ...CUERPO.filter(k => !est.data.orden.includes(k))] : CUERPO;
+  const ORDEN = ['titulo','autores','resumen','palabras_clave', ...ordenCuerpo, 'otra', 'agradecimientos', ...DECL, 'referencias', 'tablas', 'figuras'];
+  segs.sort((a,b) => ORDEN.indexOf(a.clave) - ORDEN.indexOf(b.clave));
+  S.final = {segs, paquete:{carta:ok.find(c => c.clave === '_carta')?.propuesto || '', highlights:ok.find(c => c.clave === '_highlights')?.propuesto || ''}};
+}
+function pintaResultado(){
+  construyeFinal(); const m = medir(S.final.segs), G = gaps(m, S.perfil), comp = (S.final.segs.map(s => s.text).join('\n').match(/\[COMPLETAR[^\]]*\]/g) || []).length;
+  $('resTitle').textContent = 'Listo para revisar y enviar'; $('resLede').textContent = `${S.perfil.revista} · ${S.cambios.filter(c => c.estado === 'aceptado' || c.estado === 'editado').length} cambios aplicados de ${S.cambios.length}`;
+  const decide = g => /decisión tuya/.test(g.acc), paq = g => /Paquete/.test(g.acc);
+  $('checklist').innerHTML = G.map(g => { const ok = g.est === 'ok' || (g.el === 'Secciones del texto' && S.cambios.some(c => c.clave === '_estructura' && c.estado !== 'rechazado' && c.estado !== 'pendiente')) || (g.el === 'Estilo de referencias' && S.cambios.some(c => c.clave === 'referencias' && (c.estado === 'aceptado'))) || (g.el === 'Citas en el texto' && S.cambios.some(c => c.clave === 'referencias' && c.estado === 'aceptado')) || (paq(g) && S.final.paquete[g.el === 'Carta de presentación' ? 'carta' : 'highlights']); return `<div class="check"><span class="ic ${ok ? 'ok' : decide(g) ? 'pe' : 'ko'}">${ok ? '✓' : decide(g) ? '!' : '✗'}</span><span style="flex:1">${esc(g.el)} <small style="color:var(--gris)">· ${esc(g.man)} / ${esc(g.rev)}</small></span></div>`; }).join('');
+  const P = [];
+  if(comp) P.push(`Completar ${comp} dato(s) marcados con [COMPLETAR] en las declaraciones.`);
+  G.filter(g => decide(g) && g.est !== 'ok').forEach(g => P.push(`${g.el}: ${g.acc.replace(': decisión tuya', '')}. Esto lo decides tú.`));
+  if(S.perfil.limite_palabras && m.palabras > S.perfil.limite_palabras) P.push(`El texto principal sigue teniendo ${m.palabras.toLocaleString('es')} palabras (límite ${S.perfil.limite_palabras.toLocaleString('es')}).`);
+  const refC = S.cambios.find(c => c.clave === 'referencias'); if(refC?.data?.noVerif && refC.estado !== 'rechazado') P.push(`Dar formato a mano a ${refC.data.noVerif} referencia(s) no encontradas en Crossref.`);
+  S.cambios.filter(c => c.estado === 'pendiente').forEach(c => P.push(`Cambio sin decidir: ${c.titulo} (no se ha aplicado).`));
+  P.push('Revisar tablas y figuras: se conservan como marcadores y deben ajustarse al formato de la revista.');
+  $('pendientes').innerHTML = P.map(x => `<div class="check"><span class="ic pe">!</span><span>${esc(x)}</span></div>`).join('');
+}
+
+/* ══════════ EXPORTACIONES ══════════ */
+const base = () => 'AdaptIA_' + norm(S.perfil?.revista || 'revista').replace(/[^a-z0-9]+/g, '_').slice(0, 30);
+async function docxLib(){ if(!window.docx) await cargaLib(['https://cdnjs.cloudflare.com/ajax/libs/docx/8.5.0/docx.umd.min.js','https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js']); return window.docx; }
+function runs(D, t, o = {}){ const out = []; String(t).split(/(\^[\d,–\-]+\^)/).forEach(p => { const sup = /^\^[\d,–\-]+\^$/.test(p); if(p) out.push(new D.TextRun({text:sup ? p.slice(1, -1) : p, superScript:sup, font:'Times New Roman', size:o.s || 24, bold:o.b, italics:o.i})); }); return out; }
+$('expDocx').onclick = async () => {
+  try{ const D = await docxLib(), k = [];
+    S.final.segs.forEach(s => { if(s.clave === 'titulo'){ k.push(new D.Paragraph({heading:D.HeadingLevel.TITLE, children:runs(D, s.text.split('\n')[0], {s:32, b:true})})); return; } if(s.clave === 'autores'){ s.text.split('\n').forEach(l => l.trim() && k.push(new D.Paragraph({children:runs(D, l, {s:22})}))); return; }
+      k.push(new D.Paragraph({heading:D.HeadingLevel.HEADING_1, spacing:{before:240, after:120}, children:[new D.TextRun({text:s.heading, font:'Times New Roman', size:26, bold:true})]}));
+      s.text.split(/\n+/).forEach(l => { if(!l.trim()) return; const m = l.match(/^([A-Z][A-Za-z ]{2,30}):\s+(.*)$/); k.push(new D.Paragraph({spacing:{after:120, line:480}, children:m && s.clave === 'resumen' ? [new D.TextRun({text:m[1] + ': ', bold:true, font:'Times New Roman', size:24}), ...runs(D, m[2])] : runs(D, l)})); }); });
+    dl(base() + '_manuscrito.docx', await D.Packer.toBlob(new D.Document({creator:'AdaptIA', sections:[{properties:{page:{margin:{top:1440, bottom:1440, left:1440, right:1440}}}, children:k}]}))); toast('Manuscrito descargado'); }
+  catch(e){ toast(e.message); }
+};
+$('expPaquete').onclick = async () => {
+  try{ const D = await docxLib(), p = S.perfil, k = [], H = t => new D.Paragraph({heading:D.HeadingLevel.HEADING_1, pageBreakBefore:k.length > 0, children:[new D.TextRun({text:t, font:'Arial', size:28, bold:true})]}), Pa = t => new D.Paragraph({spacing:{after:120}, children:[new D.TextRun({text:t, font:'Arial', size:22})]});
+    if(S.final.paquete.carta){ k.push(H('Cover letter')); S.final.paquete.carta.split('\n').forEach(l => k.push(Pa(l))); }
+    if(S.final.paquete.highlights){ k.push(H('Highlights')); S.final.paquete.highlights.split('\n').filter(Boolean).forEach(l => k.push(Pa('• ' + l))); }
+    const dec = S.final.segs.filter(s => DECL.includes(s.clave)); if(dec.length){ k.push(H('Declarations')); dec.forEach(s => { k.push(new D.Paragraph({children:[new D.TextRun({text:s.heading, bold:true, font:'Arial', size:22})]})); k.push(Pa(s.text)); }); }
+    k.push(H('Response to reviewers (template)')); ['Dear Editor,', `Thank you for the opportunity to revise our manuscript "${(txt('titulo', S.final.segs).split('\n')[0] || '').trim()}". We thank the reviewers for their comments. Below we respond point by point; changes in the manuscript are highlighted.`, 'Reviewer 1', 'Comment 1.1: [copy the comment]', 'Response: [explain the change or the reason for not making it]', 'Change in the manuscript: [section, page and line]', 'Reviewer 2', 'Comment 2.1: …', 'Response: …'].forEach(l => k.push(Pa(l)));
+    k.push(H('Submission checklist')); gaps(medir(S.final.segs), p).forEach(g => k.push(Pa(`${g.est === 'ok' ? '✓' : '☐'} ${g.el}: ${g.man} / ${g.rev}`)));
+    dl(base() + '_paquete_envio.docx', await D.Packer.toBlob(new D.Document({creator:'AdaptIA', sections:[{children:k}]}))); toast('Paquete de envío descargado'); }
+  catch(e){ toast(e.message); }
+};
+$('expInforme').onclick = () => { const C = S.cambios, cuenta2 = t => C.filter(c => c.tipo === t).length; dl(base() + '_informe_cambios.md', `# Informe de cambios · ${S.perfil.revista}\n\n${new Date().toLocaleString('es-ES')} · nivel ${S.nivel} · ${C.length} cambios propuestos: ${[...new Set(C.map(c => c.tipo))].map(t => `${cuenta2(t)} ${t.toLowerCase()}`).join(', ')}.\n\n${C.map((c,i) => `## ${i + 1}. ${c.titulo}\n\n- Tipo: ${c.tipo}\n- Decisión: ${c.estado}\n- Nivel del auditor: ${{ver:'editorial', amb:'revisar', roj:'posible cambio científico'}[c.nivel]}\n${c.alertas.map(a => `- ${a.g === 'roj' ? '⛔' : '⚠'} ${a.t}`).join('\n')}\n\n**Original**\n\n${c.original || '(no existía)'}\n\n**Propuesta**\n\n${c.propuesto}\n`).join('\n')}`, 'text/markdown'); };
+$('expPerfil').onclick = () => dl('perfil_' + norm(S.perfil.revista).replace(/[^a-z0-9]+/g, '_').slice(0, 40) + '.json', JSON.stringify({adaptia_perfil:1, ...S.perfil}, null, 1), 'application/json');
+
+/* ══════════ NAVEGACIÓN ══════════ */
+let step = 0, trabajando = false;
+const STEPS = ['Inicio','Manuscrito','Revista','Diagnóstico','Adaptación','Revisión','Resultado'];
+function buildStepper(){ $('stepper').innerHTML = STEPS.map((s,i) => `${i ? `<span class="sline${i <= step ? ' on' : ''}"></span>` : ''}<button class="sdot" type="button" data-go="${i}" data-state="${i < step ? 'done' : i === step ? 'now' : ''}" ${i === step ? 'aria-current="step"' : ''}><span class="n">${i < step ? ico('check') : i === 0 ? ico('doc') : i}</span><span class="lbl">${s}</span></button>`).join(''); $$('#stepper [data-go]').forEach(b => b.onclick = () => irA(+b.dataset.go)); }
+function irA(i){ if(trabajando) return toast('Espera a que terminen los agentes'); if(i >= 2 && !S.segs.length) return toast('Primero el manuscrito'); if(i >= 3 && !S.perfil) return toast('Primero el perfil de la revista'); if(i >= 5 && !S.cambios.length) return toast('Primero prepara los cambios'); if(i === 4) return; go(i); }
+function go(i){ step = i; $$('.screen').forEach(s => s.classList.toggle('on', +s.dataset.step === i)); $('progBar').style.width = (i / 6 * 100) + '%'; if(i === 1) pintaSecs(); if(i === 2){ pintaPerfil(); if(S.perfil){ $('jNombre').value = S.perfil.revista; $('jTipo').value = S.perfil.tipo || ''; } } if(i === 3) pintaDiag(); if(i === 5) pintaCambios(); if(i === 6) pintaResultado(); buildStepper(); updateNav(); window.scrollTo({top:0, behavior:'instant'}); }
+const NAV = [['Empezar','Mira primero la <b>adaptación de ejemplo</b>: no necesita clave.'],['Siguiente: la revista','Comprueba que cada bloque está en su sección.'],['Siguiente: el diagnóstico','Cada regla con su cita; confirma las que no la tienen.'],['Preparar los cambios','Nada se aplica hasta que lo revises.'],['Preparando…',''],['Aplicar lo aceptado','Rojo: posible cambio científico. Decide tú.'],['Nueva adaptación','Revisa el Word antes de enviarlo.']];
+function updateNav(){ $('navBack').classList.toggle('hidden', step === 0 || step === 4); $('navNextTxt').textContent = NAV[step][0]; $('navHint').innerHTML = NAV[step][1]; $('navNext').disabled = trabajando || step === 4; }
+$('navBack').onclick = () => { if(!trabajando && step > 0) go(step === 5 ? 3 : step - 1); };
+$('navNext').onclick = async () => {
+  if(trabajando) return;
+  if(step === 0) return go(1);
+  if(step === 1){ if(!S.segs.length) return toast('Sube o pega el manuscrito'); return go(2); }
+  if(step === 2){ if(!S.perfil) return toast('Extrae o elige el perfil de la revista'); return go(3); }
+  if(step === 3){ if(S._demo){ go(5); return; } trabajando = true; go(4); try{ S.cambios = await adaptar(); trabajando = false; toast(`${S.cambios.length} cambios propuestos`); go(5); }catch(e){ trabajando = false; log(e.message, 'ko'); toast(e.message, 7000); updateNav(); setTimeout(() => go(3), 2500); } return; }
+  if(step === 5){ const pend = S.cambios.filter(c => c.estado === 'pendiente').length; if(pend && !confirm(`Quedan ${pend} cambio(s) sin decidir: no se aplicarán. ¿Continuar?`)) return; return go(6); }
+  if(step === 6){ if(!confirm('¿Empezar otra adaptación? Los perfiles de revista se conservan.')) return; Object.assign(S, {segs:[], perfil:S._demo ? null : S.perfil, cambios:[], final:null, _demo:false}); $('secs').innerHTML = ''; $('mInfo').textContent = ''; go(1); }
+};
+$('goHome').onclick = () => irA(0);
+$('btnStart').onclick = () => go(1);
+
+/* ══════════ AJUSTES, AYUDA Y EJEMPLO ══════════ */
+$('btnAjustes').onclick = () => { $('apiKey').value = localStorage.getItem('ia_openai_key') || ''; $('modelo').value = localStorage.getItem('adaptia_model') || 'gpt-6-luna'; $('correo').value = localStorage.getItem('adaptia_correo') || ''; $('mAjustes').classList.add('on'); };
+$('apiKey').oninput = () => localStorage.setItem('ia_openai_key', $('apiKey').value.trim());
+$('modelo').onchange = () => localStorage.setItem('adaptia_model', $('modelo').value);
+$('correo').onchange = () => localStorage.setItem('adaptia_correo', $('correo').value.trim());
+$('btnEye').onclick = () => { const k = $('apiKey'); k.type = k.type === 'password' ? 'text' : 'password'; };
+const GLOS = [['Perfil de la revista','Las normas convertidas en reglas: límites, resumen, palabras clave, estilo de referencias, secciones y declaraciones. Cada regla muestra la frase de las normas en que se basa; si no la tiene, confírmala tú.'],['Cambio editorial','Forma: estructura, títulos, longitud, estilo, formato de referencias, declaraciones. Aparece en verde si el auditor no ve riesgo.'],['Cambio científico','Cifras, resultados, métodos, conclusiones o fuerza de las afirmaciones. El auditor lo marca en rojo y no se aplica salvo que lo aceptes expresamente.'],['Auditor','Compara cada propuesta con el original: cifras nuevas o eliminadas, expresiones más categóricas (de «may improve» a «improves»), citas añadidas o quitadas. Con clave, además, un segundo modelo busca cambios de significado.'],['Referencias','Cada referencia se busca en Crossref (por DOI o por su texto) y se formatea en Vancouver, AMA, APA o Harvard con los datos oficiales. Las citas del texto se convierten y se renumeran por orden de aparición. Lo que no se encuentra se deja como estaba y se marca.'],['[COMPLETAR]','Datos que solo tú conoces (comité de ética, financiación, registro…). La app nunca los inventa.'],['Privacidad','El manuscrito se procesa en tu navegador. Con clave, los fragmentos necesarios viajan a OpenAI; las referencias se consultan en Crossref y la revista en OpenAlex. Los perfiles se guardan en este navegador.']];
+$('glos').innerHTML = GLOS.map(g => `<div><b>${esc(g[0])}</b><span>${esc(g[1])}</span></div>`).join('');
+$('btnHelp').onclick = () => $('mHelp').classList.add('on');
+$$('.modal').forEach(m => m.addEventListener('click', e => { if(e.target === m || e.target.hasAttribute('data-close')) m.classList.remove('on'); }));
+document.addEventListener('keydown', e => { if(e.key === 'Escape') $$('.modal').forEach(m => m.classList.remove('on')); });
+const DEMO = {"manuscrito": "Nurse-led rapid triage and door-to-physician time in an urban emergency department: a before-after study\nAna García, Luis Pérez, María Soler\nEmergency Department, Hospital General (example)\n\nAbstract\nEmergency department crowding prolongs waiting times. We evaluated whether a nurse-led rapid triage model was associated with shorter door-to-physician times in an urban emergency department. We conducted a before-after study including all adult patients attending during February and March of 2025 (before, n = 1,284) and 2026 (after, n = 1,317). The primary outcome was door-to-physician time and the secondary outcome the proportion of patients leaving without being seen. The median door-to-physician time fell from 52 minutes (IQR 31–84) to 38 minutes (IQR 22–61) (p < 0.001), and the proportion of patients leaving without being seen fell from 4.1% to 2.6% (p = 0.03). The reduction was observed in all triage levels. A nurse-led rapid triage model was associated with shorter door-to-physician times and fewer patients leaving without being seen. Controlled studies with clinical and economic outcomes are needed before recommending its generalised implementation.\n\nIntroduction\nEmergency department crowding is associated with longer waiting times, patients leaving without being seen and worse outcomes (Christ et al., 2010). Triage systems aim to identify patients who need immediate care, but their performance varies across settings and populations (Zachariasse et al., 2019). In many European hospitals, triage is followed by a second wait before a physician first assesses the patient, and this door-to-physician interval has become a common indicator of emergency department performance.\nNurse-led rapid triage models, in which an experienced nurse assesses patients on arrival and can initiate diagnostic tests under agreed protocols, have been proposed to shorten this interval. However, the evidence on triage performance comes mainly from systematic reviews that combine heterogeneous systems and outcomes (Hinson et al., 2019), and there are few evaluations of this model in Spanish urban hospitals. Local data are needed because staffing, case mix and referral patterns differ between health systems, and because hospital managers need to know whether reorganising the triage area is worth the additional nursing time.\nThe aim of this study was to compare door-to-physician time and the proportion of patients leaving without being seen before and after the introduction of a nurse-led rapid triage model in an urban emergency department.\n\nMethods\nWe conducted a before-after study in the adult emergency department of a 600-bed urban teaching hospital. The before period ran from 1 February to 31 March 2025 and the after period from 1 February to 31 March 2026, to avoid seasonal differences. All adult patients who attended during these periods were eligible; patients arriving in cardiac arrest and those transferred directly to intensive care were excluded.\nIn the before period, patients were triaged with the Manchester Triage System by the nurse on duty and then waited to be assessed by a physician. In the after period, an experienced nurse performed rapid triage within ten minutes of arrival and could request blood tests, electrocardiograms and simple radiographs under agreed protocols before the physician assessment.\nThe primary outcome was door-to-physician time, defined as the interval between registration and the first physician assessment recorded in the electronic health record. The secondary outcome was the proportion of patients who left without being seen. Door-to-physician time was compared with the Mann-Whitney U test and proportions with the chi-squared test. Analyses were performed with R version 4.4. The study was approved by the hospital research ethics committee.\n\nResults\nA total of 1,284 patients attended during the before period and 1,317 during the after period. Age and sex were similar in both periods (median age 54 and 55 years; 51% and 52% women).\nThe median door-to-physician time was 52 minutes (IQR 31–84) before and 38 minutes (IQR 22–61) after the introduction of rapid triage (p < 0.001). The reduction was observed in all triage levels, although it was larger in the less urgent levels.\nThe proportion of patients who left without being seen fell from 4.1% to 2.6% (p = 0.03).\n\nDiscussion\nIn this before-after study, the introduction of a nurse-led rapid triage model was associated with a reduction of 14 minutes in the median door-to-physician time and with fewer patients leaving without being seen. These findings are consistent with previous work suggesting that early assessment and protocol-driven tests may reduce delays in the emergency department (Christ et al., 2010).\nThe larger reduction in less urgent patients suggests that the model may mainly shorten the waits of patients who would otherwise remain in the waiting room for a long time. This is relevant because these patients are the ones most likely to leave without being seen, and our secondary outcome moved in the same direction.\nOur study has several limitations. First, the before-after design cannot exclude the influence of other changes that occurred between the two periods, such as differences in staffing or in hospital occupancy. Second, the study was conducted in a single hospital, which limits generalisability to other settings with different case mix. Third, we did not measure clinical outcomes such as mortality or admission rates, nor the costs of the additional nursing time. Finally, door-to-physician time was obtained from routine records, which may contain registration errors, although these are unlikely to differ between periods.\nFuture studies should use designs with concurrent control groups, such as stepped-wedge trials, and include clinical and economic outcomes, as recommended in systematic reviews of triage performance (Hinson et al., 2019).\n\nConclusions\nA nurse-led rapid triage model was associated with shorter door-to-physician times and fewer patients leaving without being seen in an urban emergency department. Controlled studies are needed to confirm these findings.\n\nEthics approval\nThe study was approved by the hospital research ethics committee (reference [example]). The need for informed consent was waived because only routine anonymised data were used.\n\nFunding\nThis research received no specific grant from any funding agency.\n\nCompeting interests\nThe authors declare that they have no competing interests.\n\nReferences\nChrist, M., Grossmann, F., Winter, D., Bingisser, R., & Platz, E. (2010). Modern triage in the emergency department. Deutsches Ärzteblatt International, 107(50), 892–898. https://doi.org/10.3238/arztebl.2010.0892\nHinson, J. S., Martinez, D. A., Cabral, S., George, K., Whalen, M., Hansoti, B., & Levin, S. (2019). Triage performance in emergency medicine: A systematic review. Annals of Emergency Medicine, 74(1), 140–152. https://doi.org/10.1016/j.annemergmed.2018.09.022\nZachariasse, J. M., van der Hagen, V., Seiger, N., Mackway-Jones, K., van Veen, M., & Moll, H. A. (2019). Performance of triage systems in emergency care: A systematic review and meta-analysis. BMJ Open, 9(5), e026471. https://doi.org/10.1136/bmjopen-2018-026471\n", "normas": "Journal of Example Emergency Care — Instructions for authors (this journal is fictional and is used only as an example).\nOriginal research articles\nThe main text of original research articles should not exceed 650 words, excluding the abstract, references, tables and figure legends.\nAbstracts should be structured with the headings Background, Methods, Results and Conclusions, and must not exceed 200 words.\nAuthors should provide between 3 and 6 keywords, preferably MeSH terms.\nThe main text should be organised into the following sections: Background, Methods, Results, Discussion and Conclusions.\nReferences should follow the Vancouver style. References should be numbered consecutively in the order in which they are first mentioned in the text and cited with Arabic numerals in square brackets.\nA maximum of 30 references is allowed for original research.\nA maximum of 4 tables and 4 figures is permitted.\nThe title should be concise and must not exceed 150 characters.\nAll manuscripts must include the following declarations: ethics approval and consent to participate, competing interests, funding, data availability and author contributions.\nPlease provide 3 highlights, each with a maximum of 85 characters including spaces.\nA cover letter must be submitted with every manuscript.\n", "perfil": {"revista": "Journal of Example Emergency Care (ficticia)", "tipo": "Original research", "issn": null, "limite_palabras": 650, "resumen_max": 200, "resumen_estructurado": true, "resumen_secciones": ["Background", "Methods", "Results", "Conclusions"], "kw_min": 3, "kw_max": 6, "ref_estilo": "vancouver", "cita_formato": "corchetes", "ref_max": 30, "tablas_max": 4, "figuras_max": 4, "titulo_max": 150, "estructura": ["Background", "Methods", "Results", "Discussion", "Conclusions"], "declaraciones": ["etica", "conflicto", "financiacion", "datos", "contribuciones"], "highlights": 3, "highlights_max": 85, "carta": true, "evid": {"limite_palabras": "The main text of original research articles should not exceed 650 words", "resumen_max": "must not exceed 200 words", "resumen_estructurado": "Abstracts should be structured with the headings Background, Methods, Results and Conclusions", "resumen_secciones": "Abstracts should be structured with the headings Background, Methods, Results and Conclusions", "kw_min": "Authors should provide between 3 and 6 keywords", "kw_max": "Authors should provide between 3 and 6 keywords", "ref_estilo": "References should follow the Vancouver style.", "cita_formato": "cited with Arabic numerals in square brackets", "ref_max": "A maximum of 30 references is allowed for original research.", "tablas_max": "A maximum of 4 tables and 4 figures is permitted.", "figuras_max": "A maximum of 4 tables and 4 figures is permitted.", "titulo_max": "must not exceed 150 characters", "estructura": "The main text should be organised into the following sections: Background, Methods, Results, Discussion and Conclusions.", "declaraciones": "All manuscripts must include the following declarations", "highlights": "Please provide 3 highlights", "highlights_max": "each with a maximum of 85 characters including spaces", "carta": "A cover letter must be submitted with every manuscript."}, "evok": {"limite_palabras": true, "resumen_max": true, "resumen_estructurado": true, "resumen_secciones": true, "kw_min": true, "kw_max": true, "ref_estilo": true, "cita_formato": true, "ref_max": true, "tablas_max": true, "figuras_max": true, "titulo_max": true, "estructura": true, "declaraciones": true, "highlights": true, "highlights_max": true, "carta": true}}, "cambios": [{"tipo": "Estructura", "titulo": "Títulos y orden de las secciones", "clave": "_estructura", "propuesto": "Background\nMethods\nResults\nDiscussion\nConclusions", "data": {"orden": ["introduccion", "metodos", "resultados", "discusion", "conclusiones"], "nombres": {"introduccion": "Background", "metodos": "Methods", "resultados": "Results", "discusion": "Discussion", "conclusiones": "Conclusions"}}, "sinAuditar": true}, {"tipo": "Resumen", "titulo": "Resumen (≤ 200 palabras)", "clave": "resumen", "propuesto": "Background: Emergency department crowding prolongs waiting times. We evaluated whether a nurse-led rapid triage model was associated with shorter door-to-physician times in an urban emergency department.\nMethods: Before-after study including all adult patients attending in February and March of 2025 (before, n = 1,284) and 2026 (after, n = 1,317). The primary outcome was door-to-physician time; the secondary outcome, the proportion of patients leaving without being seen.\nResults: The median door-to-physician time fell from 52 minutes (IQR 31–84) to 38 minutes (IQR 22–61) (p < 0.001), with reductions in all triage levels. Patients leaving without being seen fell from 4.1% to 2.6% (p = 0.03).\nConclusions: A nurse-led rapid triage model was associated with shorter door-to-physician times and fewer patients leaving without being seen. Controlled studies with clinical and economic outcomes are needed before recommending its generalised implementation."}, {"tipo": "Palabras clave", "titulo": "Palabras clave (3–6)", "clave": "palabras_clave", "propuesto": "Emergency Service, Hospital; Triage; Nurse's Role; Waiting Lists; Crowding"}, {"tipo": "Longitud", "titulo": "Introducción: más breve", "clave": "introduccion", "propuesto": "Emergency department crowding is associated with longer waiting times, patients leaving without being seen and worse outcomes (Christ et al., 2010). Triage systems aim to identify patients who need immediate care, but their performance varies across settings (Zachariasse et al., 2019), and the door-to-physician interval has become a common indicator of emergency department performance.\nNurse-led rapid triage, in which an experienced nurse assesses patients on arrival and can initiate tests under agreed protocols, has been proposed to shorten this interval. However, the evidence comes mainly from systematic reviews of heterogeneous systems (Hinson et al., 2019), and few evaluations exist in Spanish urban hospitals, where staffing and case mix differ.\nWe compared door-to-physician time and the proportion of patients leaving without being seen before and after the introduction of a nurse-led rapid triage model in an urban emergency department."}, {"tipo": "Longitud", "titulo": "Discusión: más breve", "clave": "discusion", "propuesto": "The introduction of a nurse-led rapid triage model was associated with a reduction of 14 minutes in the median door-to-physician time and with fewer patients leaving without being seen. Consistent with previous work, nurse-led rapid triage reduces delays in the emergency department (Christ et al., 2010).\nThe larger reduction in less urgent patients, those most likely to leave without being seen, suggests that the model mainly shortens long waits in the waiting room.\nThis study has limitations. The before-after design cannot exclude other changes between periods, such as staffing or occupancy. It was conducted in a single hospital, which limits generalisability. We did not measure clinical outcomes or the costs of the additional nursing time, and routine records may contain registration errors.\nFuture studies should use concurrent control groups, such as stepped-wedge trials, and include clinical and economic outcomes (Hinson et al., 2019)."}, {"tipo": "Referencias", "titulo": "Referencias a Vancouver y citas del texto convertidas", "clave": "referencias", "propuesto": ""}, {"tipo": "Declaración", "titulo": "Data availability (plantilla para completar)", "clave": "datos", "propuesto": "[COMPLETAR: The data that support the findings of this study are available from the corresponding author upon reasonable request / in repository … (DOI …)]", "alertas": [{"g": "amb", "t": "Plantilla: completa los datos entre corchetes antes de enviar. La app no los inventa."}]}, {"tipo": "Declaración", "titulo": "Author contributions (plantilla para completar)", "clave": "contribuciones", "propuesto": "[COMPLETAR: e.g., AB: conceptualization, methodology, writing – original draft; CD: formal analysis, writing – review and editing. All authors read and approved the final manuscript.]", "alertas": [{"g": "amb", "t": "Plantilla: completa los datos entre corchetes antes de enviar. La app no los inventa."}]}, {"tipo": "Paquete", "titulo": "Carta de presentación", "clave": "_carta", "propuesto": "Dear Editor,\n\nPlease find enclosed our original research article \"Nurse-led rapid triage and door-to-physician time in an urban emergency department: a before-after study\" for consideration in the Journal of Example Emergency Care.\n\nIn a before-after study including 1,284 and 1,317 adult patients, the introduction of a nurse-led rapid triage model was associated with a reduction in the median door-to-physician time from 52 to 38 minutes and in the proportion of patients leaving without being seen from 4.1% to 2.6%. We believe these findings will interest your readers because they address a common organisational question in emergency departments with local data, while being explicit about the limitations of the design.\n\nThis manuscript is original, has not been published and is not under consideration elsewhere. All authors have approved the submitted version and declare no competing interests.\n\nSincerely,\n[COMPLETAR: corresponding author, affiliation and contact details]"}, {"tipo": "Paquete", "titulo": "Puntos destacados (3)", "clave": "_highlights", "propuesto": "Nurse-led rapid triage was linked to a 14-minute shorter door-to-physician time\nFewer patients left without being seen after rapid triage (4.1% to 2.6%)\nControlled studies with clinical and cost outcomes are still needed"}], "metas": [{"author": [{"family": "Christ", "given": "Michael"}, {"family": "Grossmann", "given": "Florian"}, {"family": "Winter", "given": "Daniela"}, {"family": "Bingisser", "given": "Roland"}, {"family": "Platz", "given": "Elke"}], "title": ["Modern triage in the emergency department"], "container-title": ["Deutsches Ärzteblatt international"], "short-container-title": ["Dtsch Arztebl Int"], "issued": {"date-parts": [[2010]]}, "volume": "107", "issue": "50", "page": "892-898", "DOI": "10.3238/arztebl.2010.0892"}, {"author": [{"family": "Hinson", "given": "Jeremiah S."}, {"family": "Martinez", "given": "Diego A."}, {"family": "Cabral", "given": "Stephanie"}, {"family": "George", "given": "Kevin"}, {"family": "Whalen", "given": "Madeleine"}, {"family": "Hansoti", "given": "Bhakti"}, {"family": "Levin", "given": "Scott"}], "title": ["Triage Performance in Emergency Medicine: A Systematic Review"], "container-title": ["Annals of Emergency Medicine"], "short-container-title": ["Ann Emerg Med"], "issued": {"date-parts": [[2019]]}, "volume": "74", "issue": "1", "page": "140-152", "DOI": "10.1016/j.annemergmed.2018.09.022"}, {"author": [{"family": "Zachariasse", "given": "Jan M"}, {"family": "van der Hagen", "given": "Vivian"}, {"family": "Seiger", "given": "Nienke"}, {"family": "Mackway-Jones", "given": "Kevin"}, {"family": "van Veen", "given": "Mirjam"}, {"family": "Moll", "given": "Henriette A"}], "title": ["Performance of triage systems in emergency care: a systematic review and meta-analysis"], "container-title": ["BMJ Open"], "short-container-title": ["BMJ Open"], "issued": {"date-parts": [[2019]]}, "volume": "9", "issue": "5", "page": "e026471", "DOI": "10.1136/bmjopen-2018-026471"}]};
+$('btnDemo').onclick = () => {
+  cargaManuscrito(DEMO.manuscrito, 'ejemplo.docx'); S._demo = true; S.perfil = JSON.parse(JSON.stringify(DEMO.perfil)); S.normas = DEMO.normas; $('jTexto').value = DEMO.normas; S.nivel = 'paquete';
+  const m = medir(), out = m.refsList.map((r,i) => ({...r, meta:DEMO.metas[i] || null, via:DEMO.metas[i] ? 'DOI' : ''})), R = ordenaRefs(out, 'vancouver', 'corchetes', m), todo = S.segs.map(s => s.text).join('\n\n');
+  S.cambios = DEMO.cambios.map(c => { const o = c.clave === '_estructura' ? S.segs.filter(s => CUERPO.includes(s.clave)).map(s => s.heading).join('\n') : c.clave.startsWith('_') || DECL.includes(c.clave) ? '' : c.clave === 'referencias' ? txt('referencias') : txt(c.clave); const x = {...c, id:uid('c'), estado:'pendiente', original:o}; if(c.clave === 'referencias'){ x.data = R; x.propuesto = R.lista.map(r => r.nn + '. ' + r.nueva).join('\n'); } x.alertas = [...(c.alertas || []), ...(o && !c.sinAuditar && c.clave !== 'referencias' ? auditar(o, x.propuesto, todo) : [])]; x.nivel = nivelDe(x.alertas); return x; });
+  go(3); toast('Ejemplo: manuscrito ficticio y revista ficticia. Revisa el diagnóstico y pulsa «Preparar los cambios».', 6500);
+};
+if(!localStorage.getItem('ia_openai_key') && localStorage.getItem('openai_key')) localStorage.setItem('ia_openai_key', localStorage.getItem('openai_key'));
+go(0);
+</script>
+</body>
+</html>
