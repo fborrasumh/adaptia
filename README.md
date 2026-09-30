@@ -1,5 +1,7 @@
 # AdaptIA
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23068186.svg)](https://doi.org/10.5281/zenodo.23068186)
+
 **Aplicación:** https://fborrasumh.github.io/adaptia/
 
 **Asistente de envío a revista.** Adapta un artículo científico a las normas de la revista elegida **sin tocar la ciencia**: construye el perfil editorial de la revista, compara el manuscrito con él, propone solo los cambios necesarios con un *diff científico* que el autor acepta o rechaza, convierte las referencias verificándolas en Crossref y prepara el paquete de envío. Aplicación de un solo fichero (`index.html`), sin servidor ni cuenta, con el diseño de la familia Forja.
@@ -42,6 +44,12 @@ Cada referencia se busca en **Crossref** (por DOI o por su texto) y se formatea 
 ## Privacidad
 
 El manuscrito se procesa en el navegador. Con clave (`ia_openai_key`, compartida con el resto del catálogo), los fragmentos necesarios viajan a OpenAI. Las referencias se consultan en Crossref y la revista en OpenAlex. Los perfiles de revista se guardan en `localStorage`.
+
+## Cómo citar
+
+Borrás Rocher, F. (2026). *AdaptIA* (versión 1.0.0) [Software]. Universidad Miguel Hernández de Elche. https://doi.org/10.5281/zenodo.23068186
+
+El DOI es el de concepto: apunta siempre a la última versión. GitHub ofrece la cita en APA y BibTeX con el botón *Cite this repository*, a partir de `CITATION.cff`.
 
 Forma parte del catálogo [Herramientas IA para la academia](https://fborrasumh.github.io/ia/).
 
