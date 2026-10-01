@@ -60,6 +60,7 @@
 </script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="author" content="Fernando Borrás Rocher; Alejandro Ruiz Picazo">
 <title>AdaptIA · Tu artículo, adaptado a la revista sin tocar la ciencia</title>
 <meta name="description" content="Asistente de envío a revista: analiza las normas, compara tu manuscrito, propone solo los cambios necesarios con un diff científico que tú aceptas, convierte las referencias y prepara el paquete de envío.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -585,6 +586,7 @@ table.bp td.cell{padding:0;min-width:64px}
   .screen.on{display:block!important}
   .paper,.carta{box-shadow:none;border:0;padding:0}
 }
+.cu-autores{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:22px;padding-top:18px;border-top:1px solid rgba(255,255,255,.14)}.cu-autor{display:flex;gap:11px;align-items:center}.cu-autor b{display:block;color:#fff;font:700 16px var(--display);letter-spacing:-.01em}.cu-autor small{display:block;color:#9DB6CD;font-size:12.5px}.cu-av{width:42px;height:42px;border-radius:13px;background:var(--c);color:#fff;display:grid;place-items:center;font:800 14px var(--display);flex:none;box-shadow:0 10px 20px -12px var(--c)}.cu-y{font:300 24px var(--display);color:#5D7C9B}
 </style>
 </head>
 <body>
@@ -660,6 +662,7 @@ table.bp td.cell{padding:0;min-width:64px}
       <button class="btn btn-primary btn-big" id="btnStart" type="button"><svg class="i"><use href="#i-play"/></svg>Adaptar mi artículo</button>
       <button class="btn btn-ghost btn-big" id="btnDemo" type="button"><svg class="i"><use href="#i-eye"/></svg>Ver una adaptación de ejemplo</button>
     </div>
+    <div class="cu-autores"><div class="cu-autor"><span class="cu-av" style="--c:#E4572E">FB</span><div><b>Fernando Borrás Rocher</b><small>Universidad Miguel Hernández de Elche</small></div></div><span class="cu-y">×</span><div class="cu-autor"><span class="cu-av" style="--c:#0E8C7A">AR</span><div><b>Alejandro Ruiz Picazo</b><small>Universidad Miguel Hernández de Elche</small></div></div></div>
     <p class="quote">Cambia la forma; <span>la ciencia la decides tú.</span></p>
   </div>
   <h2 class="sec-title">Dos tipos de cambio</h2>
@@ -763,7 +766,7 @@ table.bp td.cell{padding:0;min-width:64px}
 </section>
 </main>
 
-<footer><hr><p>AdaptIA · Fernando Borrás Rocher · Universidad Miguel Hernández de Elche. Asistente editorial: la responsabilidad del contenido y del envío es de los autores. El manuscrito se procesa en tu navegador; con clave, los fragmentos necesarios viajan a OpenAI y las referencias se consultan en Crossref.</p></footer>
+<footer><hr><p>AdaptIA · Fernando Borrás Rocher y Alejandro Ruiz Picazo · Universidad Miguel Hernández de Elche. Asistente editorial: la responsabilidad del contenido y del envío es de los autores. El manuscrito se procesa en tu navegador; con clave, los fragmentos necesarios viajan a OpenAI y las referencias se consultan en Crossref.</p></footer>
 
 <div class="bottomnav"><div class="bn-in">
   <button class="btn btn-ghost" id="navBack" type="button"><svg class="i"><use href="#i-left"/></svg>Atrás</button>
@@ -778,7 +781,7 @@ table.bp td.cell{padding:0;min-width:64px}
 "use strict";
 /* ══════════════════════════════════════════════════════════
    AdaptIA · asistente de envío a revista
-   Fernando Borrás Rocher · Universidad Miguel Hernández de Elche
+   Fernando Borrás Rocher y Alejandro Ruiz Picazo · Universidad Miguel Hernández de Elche
    ══════════════════════════════════════════════════════════ */
 const $ = id => document.getElementById(id), $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
