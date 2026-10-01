@@ -47,7 +47,7 @@ El manuscrito se procesa en el navegador. Con clave (`ia_openai_key`, compartida
 
 ## Cómo citar
 
-Borrás Rocher, F. (2026). *AdaptIA* (versión 1.0.0) [Software]. Universidad Miguel Hernández de Elche. https://doi.org/10.5281/zenodo.23068186
+Borrás Rocher, F. y Ruiz Picazo, A. (2026). *AdaptIA* (versión 1.0.1) [Software]. Universidad Miguel Hernández de Elche. https://doi.org/10.5281/zenodo.23068186
 
 El DOI es el de concepto: apunta siempre a la última versión. GitHub ofrece la cita en APA y BibTeX con el botón *Cite this repository*, a partir de `CITATION.cff`.
 
@@ -55,4 +55,6 @@ Forma parte del catálogo [Herramientas IA para la academia](https://fborrasumh.
 
 ## Licencia
 
-MIT © 2026 Fernando Borrás Rocher · Universidad Miguel Hernández de Elche.
+MIT © 2026 Fernando Borrás Rocher y Alejandro Ruiz Picazo · Universidad Miguel Hernández de Elche.
+
+ORCID: Fernando Borrás Rocher [0000-0002-5519-4573](https://orcid.org/0000-0002-5519-4573) · Alejandro Ruiz Picazo [0000-0003-1281-8208](https://orcid.org/0000-0003-1281-8208)
